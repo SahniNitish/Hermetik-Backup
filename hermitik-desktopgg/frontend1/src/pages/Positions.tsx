@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { walletApi } from '../services/api';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
 import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import DataTable from '../components/UI/DataTable';
@@ -36,6 +36,74 @@ const Positions: React.FC = () => {
       console.error('❌ Wallet API Error:', err);
     }
   });
+
+  // Debug APY query conditions
+  const hasToken = !!localStorage.getItem('access_token');
+  const hasWallets = !!wallets;
+  const apyQueryEnabled = hasToken && hasWallets;
+  
+  console.log('🔍 APY Query Debug:');
+  console.log('  - Has token:', hasToken);
+  console.log('  - Has wallets:', hasWallets);
+  console.log('  - Query enabled:', apyQueryEnabled);
+  console.log('  - Viewed user:', viewedUser?.id);
+  
+  // Force APY query to run immediately for testing
+  if (apyQueryEnabled) {
+    console.log('🔧 APY Query should be running now...');
+  }
+
+  // Fetch position APY data
+  const { data: positionAPYs, isLoading: isLoadingAPY, error: apyError } = useQuery({
+    queryKey: ['positionAPYs', viewedUser?.id],
+    queryFn: async () => {
+      console.log('🚀 QUERYFUNCTION CALLED! Fetching APY data for user:', viewedUser?.id);
+      console.log('🔑 Using token:', localStorage.getItem('access_token') ? 'Token exists' : 'No token');
+      
+      try {
+        
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          }
+        });
+        
+        console.log('📡 APY API Response status:', response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ APY API Error:', response.status, errorText);
+          throw new Error(`Failed to fetch position APYs: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('✅ APY API Success - Raw response:', data);
+        console.log('📊 Position count:', data.positionCount);
+        
+        return data;
+      } catch (error) {
+        console.error('❌ Position APYs error:', error);
+        return null;
+      }
+    },
+    enabled: apyQueryEnabled,
+    refetchInterval: 300000, // Refresh every 5 minutes
+    staleTime: 240000 // Consider data stale after 4 minutes
+  });
+
+  // Debug APY query state
+  console.log('📊 APY Query State:');
+  console.log('  - isLoading:', isLoadingAPY);
+  console.log('  - data:', positionAPYs);
+  console.log('  - error:', apyError);
+  
+  // Check user ID mismatch
+  if (positionAPYs && positionAPYs.userId !== viewedUser?.id) {
+    console.log('⚠️ USER ID MISMATCH!');
+    console.log('  - Frontend viewing:', viewedUser?.id);
+    console.log('  - API returned data for:', positionAPYs.userId);
+    console.log('  - APY positions:', positionAPYs.positions);
+  }
 
   if (isLoading) {
     return (
@@ -231,8 +299,8 @@ const Positions: React.FC = () => {
     return acc;
   }, {} as Record<string, Token & { wallet?: string }>);
   // Filter tokens - temporarily show ALL tokens to debug what's available
-  const tokensArray = Object.values(uniqueTokens).filter(token => true); // Show all tokens for debugging
-  const totalTokensValue = tokensArray.reduce((sum, token) => sum + token.usd_value, 0);
+  const tokensArray: (Token & { wallet?: string })[] = Object.values(uniqueTokens).filter(token => true); // Show all tokens for debugging
+  const totalTokensValue: number = tokensArray.reduce((sum: number, token: Token & { wallet?: string }) => sum + token.usd_value, 0);
 
   // Prepare tokens table data  
   const tokensTableData = tokensArray.map(token => ({
@@ -251,6 +319,13 @@ const Positions: React.FC = () => {
     // Aggregate all position tokens with deduplication
     const positionTokensMap = new Map<string, any>();
     const rewardTokensMap = new Map<string, any>();
+    
+    // Collect position names and wallet addresses for APY lookup
+    const protocolWithSource = protocol as Protocol & { sourceWallet?: string };
+    const protocolPositionInfo = {
+      positions: protocol.positions.map(pos => pos.position_name),
+      walletAddresses: [protocolWithSource.sourceWallet || ''] // Use source wallet if available
+    };
     
     protocol.positions.forEach(position => {
       // Process position tokens
@@ -373,10 +448,12 @@ const Positions: React.FC = () => {
     
     // Use the calculated total instead of protocol.net_usd_value (which may be 0)
     const calculatedTotal = finalPositionNav + finalRewardNav;
+    
     return {
       protocol,
       sections,
-      totalNavValue: calculatedTotal
+      totalNavValue: calculatedTotal,
+      positionInfo: protocolPositionInfo // Include position info for APY lookups
     };
   });
 
@@ -403,6 +480,116 @@ const Positions: React.FC = () => {
   protocolPositions.forEach((item, index) => {
     console.log(`${index + 1}. ${item.protocol.name} - ${item.sections.length} sections - $${item.totalNavValue}`);
   });
+
+  // Generate position IDs for APY lookup using Debank position IDs
+  const generatePositionId = (protocolName: string, positionName: string, walletAddress: string, debankPositionId?: string): string => {
+    // Use Debank position ID if available, otherwise fall back to constructed ID
+    return debankPositionId || `${protocolName}_${positionName}_${walletAddress}`.toLowerCase().replace(/\s+/g, '_');
+  };
+
+  // Create APY lookup map
+  const apyLookup = new Map();
+  if (positionAPYs?.success && positionAPYs.positions) {
+    console.log('🗺️ Creating APY lookup map:');
+    Object.entries(positionAPYs.positions).forEach(([positionId, apyData]) => {
+      console.log(`  - ${positionId}:`, apyData?.daily?.apy || 'No daily APY');
+      apyLookup.set(positionId, apyData);
+    });
+    console.log(`📊 APY lookup map created with ${apyLookup.size} positions`);
+  }
+
+  // Helper component to display APY data
+  const APYDisplay = ({ protocolName, positionName, walletAddress, debankPositionId }: { 
+    protocolName: string, 
+    positionName: string, 
+    walletAddress: string,
+    debankPositionId?: string 
+  }) => {
+    const positionId = generatePositionId(protocolName, positionName, walletAddress, debankPositionId);
+    const apyData = apyLookup.get(positionId);
+    
+    console.log(`🔍 APYDisplay lookup for ${protocolName}/${positionName}:`);
+    console.log(`  - Generated ID: ${positionId}`);
+    console.log(`  - Found APY data:`, apyData ? 'YES' : 'NO');
+    console.log(`  - Debank ID: ${debankPositionId || 'None'}`);
+    
+    if (apyData) {
+      console.log(`  - Daily APY: ${apyData.daily?.apy || 'No daily APY'}`);
+    }
+
+    if (!apyData) {
+      return (
+        <div className="text-xs text-gray-500 mt-1">
+          APY: No data available
+        </div>
+      );
+    }
+
+    const periods = [
+      { key: 'daily', label: '1D' },
+      { key: 'weekly', label: '7D' },
+      { key: 'monthly', label: '30D' }
+    ];
+
+    const hasAnyData = periods.some(period => 
+      apyData[period.key] && apyData[period.key].rawAPY !== null
+    );
+
+    if (!hasAnyData) {
+      return (
+        <div className="text-xs text-gray-500 mt-1">
+          APY: Calculating... (new position)
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-2 space-y-1">
+        <div className="flex items-center text-xs text-gray-400">
+          <BarChart3 className="w-3 h-3 mr-1" />
+          <span>APY Performance:</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {periods.map(period => {
+            const periodData = apyData[period.key];
+            const hasData = periodData && periodData.rawAPY !== null;
+            const isPositive = hasData ? periodData.rawAPY >= 0 : null;
+            const isNewPosition = periodData?.isNewPosition || false;
+            
+            return (
+              <div key={period.key} className="text-xs">
+                <span className="text-gray-500">{period.label}: </span>
+                {hasData ? (
+                  <div className="flex items-center">
+                    <span className={`font-medium ${
+                      isPositive ? 'text-green-400' : 'text-red-400'
+                    }`}>
+                      {periodData.apy}
+                      {isPositive ? (
+                        <TrendingUp className="w-3 h-3 inline ml-1" />
+                      ) : (
+                        <TrendingDown className="w-3 h-3 inline ml-1" />
+                      )}
+                    </span>
+                    {isNewPosition && period.key === 'daily' && (
+                      <span className="text-blue-400 text-xs ml-1" title="Based on unclaimed rewards">*</span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-500">No data</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {apyData.daily?.isNewPosition && (
+          <div className="text-xs text-blue-400 mt-1">
+            * New position APY based on unclaimed rewards
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Define table columns
   const tokensColumns = [
@@ -460,6 +647,50 @@ const Positions: React.FC = () => {
         </div>
       </Card>
 
+      {/* APY Status Indicator */}
+      {isLoadingAPY ? (
+        <Card>
+          <div className="flex items-center justify-center py-4">
+            <LoadingSpinner size="sm" />
+            <span className="text-gray-400 ml-3">Loading APY data...</span>
+          </div>
+        </Card>
+      ) : positionAPYs?.success ? (
+        <Card>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <BarChart3 className="w-5 h-5 mr-2 text-green-500" />
+              <div>
+                <h3 className="text-sm font-medium text-white">APY Data Available</h3>
+                <p className="text-xs text-gray-400">
+                  Showing performance data for {positionAPYs.positionCount} positions
+                </p>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500">
+              Updated: {new Date().toLocaleTimeString()}
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <BarChart3 className="w-5 h-5 mr-2 text-gray-500" />
+              <div>
+                <h3 className="text-sm font-medium text-gray-400">APY Data Not Available</h3>
+                <p className="text-xs text-gray-500">
+                  Position performance tracking requires historical data collection. New positions will show immediate APY.
+                </p>
+              </div>
+            </div>
+            <div className="text-xs text-gray-600">
+              Daily snapshots needed
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* TOKENS Section */}
       <DataTable
         columns={tokensColumns}
@@ -482,6 +713,51 @@ const Positions: React.FC = () => {
           className="mb-4"
         />
       </div>
+
+      {/* Position APY Details */}
+      {positionAPYs?.success && positionAPYs.positionCount > 0 && (
+        <Card>
+          <h2 className="text-xl font-semibold text-white mb-6 flex items-center">
+            <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
+            Position APY Performance
+          </h2>
+          <div className="text-center py-8">
+            <p className="text-green-500 text-lg">
+              🎉 APY Data Available! 
+            </p>
+            <p className="text-gray-400 text-sm mt-2">
+              Found {positionAPYs.positionCount} positions with APY data
+            </p>
+            <div className="mt-4 text-left">
+              <p className="text-white font-semibold">Available Positions:</p>
+              {Object.entries(positionAPYs.positions || {}).map(([positionId, apyData]: [string, any]) => (
+                <div key={positionId} className="mt-2 p-3 bg-gray-800 rounded">
+                  <p className="text-sm text-gray-300">ID: {positionId}</p>
+                  <p className="text-lg text-green-400">
+                    Daily APY: {apyData?.daily?.apy || 'No data'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Position table */}
+      <Card>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6 flex items-center">
+          <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
+          Position Details
+        </h2>
+        <div className="space-y-4 mb-6">
+          <p className="text-gray-600 dark:text-gray-400 text-sm">Click on protocols and sections to expand/collapse</p>
+        </div>
+        <AccordionDataTable
+          columns={positionsColumns}
+          data={protocolPositions}
+          className="mb-4"
+        />
+      </Card>
 
       {/* Summary */}
       <Card>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { walletApi, analyticsApi } from '../services/api';
-import { TrendingUp, TrendingDown, Wallet, DollarSign, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, DollarSign, Download, Calendar, BarChart3 } from 'lucide-react';
 import { useUserView } from '../contexts/UserViewContext';
 import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -28,6 +28,30 @@ const Dashboard: React.FC = () => {
       return walletApi.getWallets();
     },
     refetchInterval: 30000,
+  });
+
+  // Fetch portfolio APY performance
+  const { data: portfolioPerformance, isLoading: isLoadingPerformance } = useQuery({
+    queryKey: ['portfolioPerformance', viewedUser?.id],
+    queryFn: async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/portfolio/apy-performance`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          }
+        });
+        if (!response.ok) {
+          throw new Error('Failed to fetch portfolio performance');
+        }
+        return response.json();
+      } catch (error) {
+        console.log('Portfolio performance not available:', error);
+        return null;
+      }
+    },
+    enabled: !!localStorage.getItem('access_token'),
+    refetchInterval: 300000, // Refresh every 5 minutes
+    staleTime: 240000 // Consider data stale after 4 minutes
   });
 
   console.log('Dashboard: Query state:', { wallets, isLoading, error: queryError });
@@ -453,6 +477,81 @@ const Dashboard: React.FC = () => {
         </Card>
       </div>
 
+      {/* Portfolio Performance APY Section */}
+      <Card>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-white flex items-center">
+            <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
+            Portfolio Performance
+          </h2>
+          <div className="flex items-center text-sm text-gray-400">
+            <Calendar className="w-4 h-4 mr-1" />
+            APY-based returns
+          </div>
+        </div>
+        
+        {isLoadingPerformance ? (
+          <div className="flex items-center justify-center py-8">
+            <LoadingSpinner size="md" />
+            <span className="text-gray-400 ml-3">Loading performance data...</span>
+          </div>
+        ) : portfolioPerformance?.success && portfolioPerformance.performance ? (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {[
+              { key: 'daily', label: '1D', icon: '📈' },
+              { key: 'weekly', label: '7D', icon: '📊' },
+              { key: 'monthly', label: '30D', icon: '📅' },
+              { key: 'sixMonth', label: '6M', icon: '📆' },
+              { key: 'allTime', label: 'All Time', icon: '🏆' }
+            ].map(({ key, label, icon }) => {
+              const perfData = portfolioPerformance.performance[key];
+              const hasData = perfData && perfData.rawPerformance !== null && perfData.performance !== 'No data';
+              const isPositive = hasData ? perfData.rawPerformance >= 0 : null;
+              
+              return (
+                <div key={key} className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-400 font-medium">{label}</span>
+                    <span className="text-lg">{icon}</span>
+                  </div>
+                  
+                  {hasData ? (
+                    <>
+                      <div className={`text-lg font-bold mb-1 ${
+                        isPositive ? 'text-green-400' : 'text-red-400'
+                      }`}>
+                        {perfData.performance}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {perfData.days} day{perfData.days !== 1 ? 's' : ''}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-lg font-bold mb-1 text-gray-500">
+                        No data
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Insufficient history
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <div className="text-gray-500 mb-2">📊</div>
+            <p className="text-gray-400 text-sm">
+              Portfolio performance data will be available once historical position data is collected.
+            </p>
+            <p className="text-gray-500 text-xs mt-1">
+              New positions show immediate APY based on unclaimed rewards. Historical data enhances accuracy.
+            </p>
+          </div>
+        )}
+      </Card>
 
       {/* Wallets Overview */}
       <Card>
