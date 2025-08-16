@@ -17,9 +17,34 @@ interface CalculationParams {
   priorPreFeeNav: number;
   netFlows: number;
   hurdleRate: number;
+  hurdleRateType: 'annual' | 'monthly';
   highWaterMark: number;
   performanceFeeRate: number;
   accruedPerformanceFeeRate: number;
+  feePaymentStatus: 'paid' | 'not_paid' | 'partially_paid';
+  partialPaymentAmount: number;
+  priorPreFeeNavSource: 'manual' | 'auto_loaded' | 'fallback' | 'portfolio_estimate';
+}
+
+interface PriorNavData {
+  found: boolean;
+  priorPreFeeNav: number;
+  source: 'manual' | 'auto_loaded' | 'fallback' | 'portfolio_estimate' | 'fallback_needed';
+  priorMonth: number;
+  priorYear: number;
+  priorMonthName: string;
+  message: string;
+  priorSettings?: {
+    totalAssets: number;
+    netAssets: number;
+    performance: number;
+    createdAt: string;
+  };
+}
+
+interface ValidationWarning {
+  type: 'warning' | 'error' | 'info';
+  message: string;
 }
 
 interface MonthYear {
@@ -35,6 +60,9 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [validationWarnings, setValidationWarnings] = useState<ValidationWarning[]>([]);
+  const [priorNavData, setPriorNavData] = useState<PriorNavData | null>(null);
+  const [isLoadingPriorNav, setIsLoadingPriorNav] = useState(false);
   
   // Current month/year selection
   const currentDate = new Date();
@@ -55,9 +83,13 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
     priorPreFeeNav: 0,
     netFlows: 0,
     hurdleRate: 0,
+    hurdleRateType: 'annual',
     highWaterMark: 0,
     performanceFeeRate: 0.25,
-    accruedPerformanceFeeRate: 0.25
+    accruedPerformanceFeeRate: 0.25,
+    feePaymentStatus: 'not_paid',
+    partialPaymentAmount: 0,
+    priorPreFeeNavSource: 'manual'
   });
 
   // Portfolio values
@@ -124,6 +156,68 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       console.error('Error loading available months:', error);
     }
   };
+  
+  // Load prior period NAV automatically
+  const loadPriorPeriodNav = async () => {
+    if (!hasAccess || !viewedUser) return;
+    
+    setIsLoadingPriorNav(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/nav-settings/${viewedUser.id}/${selectedYear}/${selectedMonth}/prior-nav`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data: PriorNavData = await response.json();
+        setPriorNavData(data);
+        
+        console.log('Prior NAV data loaded:', data);
+        
+        // Don't auto-update if user has manually set a value and it's different
+        if (data.found && (params.priorPreFeeNav === 0 || params.priorPreFeeNavSource === 'auto_loaded')) {
+          setParams(prev => ({
+            ...prev,
+            priorPreFeeNav: data.priorPreFeeNav,
+            priorPreFeeNavSource: data.source
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading prior period NAV:', error);
+      setPriorNavData(null);
+    } finally {
+      setIsLoadingPriorNav(false);
+    }
+  };
+  
+  // Manual load prior period NAV
+  const handleLoadPriorNav = async () => {
+    if (!priorNavData || !priorNavData.found) return;
+    
+    setParams(prev => ({
+      ...prev,
+      priorPreFeeNav: priorNavData.priorPreFeeNav || 0,
+      priorPreFeeNavSource: 'auto_loaded'
+    }));
+    
+    setSuccessMessage(`Prior NAV loaded from ${priorNavData.priorMonthName || 'previous month'} ${priorNavData.priorYear || ''}`);
+    setTimeout(() => setSuccessMessage(''), 3000);
+  };
+  
+  // Use current portfolio as fallback for first month
+  const handleUseCurrentPortfolio = () => {
+    const currentValue = portfolioData.totalTokensValue + portfolioData.totalPositionsValue;
+    setParams(prev => ({
+      ...prev,
+      priorPreFeeNav: currentValue,
+      priorPreFeeNavSource: 'portfolio_estimate'
+    }));
+    
+    setSuccessMessage('Used current portfolio value as baseline for first month');
+    setTimeout(() => setSuccessMessage(''), 3000);
+  };
 
   // Load saved settings when navSettings changes
   useEffect(() => {
@@ -132,8 +226,25 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       if (navSettings.portfolioData) {
         setPortfolioData(navSettings.portfolioData);
       }
+      
+      // Set validation warnings if any
+      if (navSettings.navCalculations?.validationWarnings) {
+        setValidationWarnings(
+          navSettings.navCalculations.validationWarnings.map((warning: string) => ({
+            type: 'warning' as const,
+            message: warning
+          }))
+        );
+      }
     }
   }, [navSettings]);
+  
+  // Auto-load prior period NAV when month/year changes
+  useEffect(() => {
+    if (hasAccess && viewedUser) {
+      loadPriorPeriodNav();
+    }
+  }, [selectedMonth, selectedYear, hasAccess, viewedUser]);
 
   // Calculate portfolio values when data changes
   useEffect(() => {
@@ -184,15 +295,66 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
 
   // NAV Calculations
   const calculations = React.useMemo(() => {
-    const investments = portfolioData.totalTokensValue + portfolioData.totalPositionsValue - portfolioData.totalRewards;
-    const dividendsReceivable = portfolioData.totalRewards;
+    // Ensure portfolioData and params are defined with safe defaults
+    const safePortfolioData = portfolioData || { totalTokensValue: 0, totalPositionsValue: 0, totalRewards: 0 };
+    const safeParams = params || {
+      monthlyExpense: 0,
+      priorPreFeeNav: 0,
+      netFlows: 0,
+      hurdleRate: 0,
+      hurdleRateType: 'annual',
+      performanceFeeRate: 0,
+      accruedPerformanceFeeRate: 0,
+      feePaymentStatus: 'not_paid',
+      partialPaymentAmount: 0
+    };
+    
+    const investments = safePortfolioData.totalTokensValue + safePortfolioData.totalPositionsValue - safePortfolioData.totalRewards;
+    const dividendsReceivable = safePortfolioData.totalRewards;
     const totalAssets = investments + dividendsReceivable;
-    const accruedExpenses = params.monthlyExpense;
+    const accruedExpenses = safeParams.monthlyExpense || 0;
     const totalLiabilities = accruedExpenses;
     const preFeeNav = totalAssets - accruedExpenses;
-    const performance = preFeeNav - params.priorPreFeeNav - params.netFlows;
-    const performanceFee = performance > params.hurdleRate ? performance * params.performanceFeeRate : 0;
-    const accruedPerformanceFees = dividendsReceivable * params.accruedPerformanceFeeRate;
+    
+    // Fix: Proper net flows calculation  
+    // Performance = Current NAV - Prior NAV + Net Flows
+    // Note: Negative net flows = withdrawals (reduce performance), Positive = deposits (increase performance)
+    // Example: If $500 withdrawn (-500), performance = current - prior + (-500) = current - prior - 500
+    const performance = preFeeNav - (safeParams.priorPreFeeNav || 0) + (safeParams.netFlows || 0);
+    
+    // Fix: Convert hurdle rate percentage to dollar amount
+    let hurdleAmount = 0;
+    if ((safeParams.hurdleRate || 0) > 0 && (safeParams.priorPreFeeNav || 0) > 0) {
+      if (safeParams.hurdleRateType === 'annual') {
+        // Convert annual percentage to monthly dollar amount
+        hurdleAmount = ((safeParams.hurdleRate || 0) / 100 / 12) * (safeParams.priorPreFeeNav || 0);
+      } else {
+        // Monthly percentage to dollar amount
+        hurdleAmount = ((safeParams.hurdleRate || 0) / 100) * (safeParams.priorPreFeeNav || 0);
+      }
+    }
+    
+    // Fix: Performance fee calculation with proper hurdle rate
+    const performanceFee = performance > hurdleAmount ? (performance - hurdleAmount) * (safeParams.performanceFeeRate || 0) : 0;
+    
+    // Fix: Accrued performance fees based on payment status
+    let accruedPerformanceFees = 0;
+    const calculatedAccruedFees = dividendsReceivable * (safeParams.accruedPerformanceFeeRate || 0);
+    
+    switch (safeParams.feePaymentStatus) {
+      case 'paid':
+        accruedPerformanceFees = 0;
+        break;
+      case 'not_paid':
+        accruedPerformanceFees = calculatedAccruedFees;
+        break;
+      case 'partially_paid':
+        accruedPerformanceFees = Math.max(0, calculatedAccruedFees - (safeParams.partialPaymentAmount || 0));
+        break;
+      default:
+        accruedPerformanceFees = calculatedAccruedFees;
+    }
+    
     const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
 
     return {
@@ -203,19 +365,84 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       totalLiabilities,
       preFeeNav,
       performance,
+      hurdleAmount,
       performanceFee,
       accruedPerformanceFees,
+      calculatedAccruedFees, // For display purposes
       netAssets
     };
   }, [portfolioData, params]);
 
   // Update parameters
-  const updateParam = (key: keyof CalculationParams, value: number) => {
-    setParams(prev => ({
-      ...prev,
-      [key]: value
-    }));
+  const updateParam = (key: keyof CalculationParams, value: number | string) => {
+    setParams(prev => {
+      const newParams = {
+        ...prev,
+        [key]: value
+      };
+      
+      // If manually changing prior NAV, update source
+      if (key === 'priorPreFeeNav' && typeof value === 'number') {
+        newParams.priorPreFeeNavSource = 'manual';
+      }
+      
+      return newParams;
+    });
   };
+  
+  // Validate current calculations
+  const validateCalculations = () => {
+    const warnings: ValidationWarning[] = [];
+    
+    // Safety check - ensure all values are defined
+    if (!calculations || !params) {
+      return;
+    }
+    
+    // Check for unrealistic performance
+    if ((params.priorPreFeeNav || 0) > 0) {
+      const performancePercent = ((calculations.performance || 0) / (params.priorPreFeeNav || 1)) * 100;
+      
+      if (performancePercent > 100) {
+        warnings.push({
+          type: 'warning',
+          message: `Performance of ${performancePercent.toFixed(1)}% seems unrealistically high`
+        });
+      }
+      
+      if (performancePercent < -90) {
+        warnings.push({
+          type: 'warning', 
+          message: `Performance of ${performancePercent.toFixed(1)}% seems unrealistically low`
+        });
+      }
+    }
+    
+    // Check if net flows are larger than prior NAV
+    if (Math.abs(params.netFlows || 0) > (params.priorPreFeeNav || 0) && (params.priorPreFeeNav || 0) > 0) {
+      const flowType = (params.netFlows || 0) < 0 ? 'withdrawal' : 'deposit';
+      const flowAmount = Math.abs(params.netFlows || 0);
+      warnings.push({
+        type: 'warning',
+        message: `${flowType.charAt(0).toUpperCase() + flowType.slice(1)} of $${flowAmount.toLocaleString()} is larger than prior NAV - please verify`
+      });
+    }
+    
+    // Check for negative NAV
+    if ((calculations.preFeeNav || 0) < 0) {
+      warnings.push({
+        type: 'error',
+        message: 'Current NAV is negative - please review calculations'
+      });
+    }
+    
+    setValidationWarnings(warnings);
+  };
+  
+  // Run validation when calculations change
+  useEffect(() => {
+    validateCalculations();
+  }, [calculations, params]);
 
   // Save NAV settings
   const handleSave = async () => {
@@ -233,11 +460,15 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         },
         body: JSON.stringify({
-          feeSettings: params,
+          feeSettings: {
+            ...params,
+            priorPreFeeNavSource: params.priorPreFeeNavSource
+          },
           navCalculations: {
             ...calculations,
             priorPreFeeNav: params.priorPreFeeNav,
-            netFlows: params.netFlows
+            netFlows: params.netFlows,
+            priorPreFeeNavSource: params.priorPreFeeNavSource
           },
           portfolioData
         })
@@ -268,15 +499,18 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
 
     try {
       const queryParams = new URLSearchParams({
-        userId: viewedUser.id,
+        userId: viewedUser?.id || '',
         annualExpense: params.annualExpense.toString(),
         monthlyExpense: params.monthlyExpense.toString(),
         priorPreFeeNav: params.priorPreFeeNav.toString(),
         netFlows: params.netFlows.toString(),
         hurdleRate: params.hurdleRate.toString(),
+        hurdleRateType: params.hurdleRateType,
         highWaterMark: params.highWaterMark.toString(),
         performanceFeeRate: params.performanceFeeRate.toString(),
-        accruedPerformanceFeeRate: params.accruedPerformanceFeeRate.toString()
+        accruedPerformanceFeeRate: params.accruedPerformanceFeeRate.toString(),
+        feePaymentStatus: params.feePaymentStatus,
+        partialPaymentAmount: params.partialPaymentAmount.toString()
       });
 
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/export/nav-calculator?${queryParams}`, {
@@ -298,7 +532,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      const filename = `${viewedUser.name.replace(/\s+/g, '_')}_Current_NAV_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const filename = `${(viewedUser?.name || 'User').replace(/\s+/g, '_')}_Current_NAV_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
       link.download = filename;
       
       document.body.appendChild(link);
@@ -326,7 +560,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
     setError('');
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/export/nav-monthly/${viewedUser.id}/${exportYear}/${exportMonth}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/export/nav-monthly/${viewedUser?.id}/${exportYear}/${exportMonth}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         }
@@ -349,7 +583,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
         'January', 'February', 'March', 'April', 'May', 'June',
         'July', 'August', 'September', 'October', 'November', 'December'
       ];
-      const filename = `${viewedUser.name.replace(/\s+/g, '_')}_NAV_Report_${monthNames[exportMonth - 1]}_${exportYear}.xlsx`;
+      const filename = `${(viewedUser?.name || 'User').replace(/\s+/g, '_')}_NAV_Report_${monthNames[exportMonth - 1]}_${exportYear}.xlsx`;
       link.download = filename;
       
       document.body.appendChild(link);
@@ -424,7 +658,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
           <div>
             <h1 className="text-2xl font-bold text-white">NAV Report Calculator</h1>
             <p className="text-gray-400 text-sm">
-              Generating NAV report for: <span className="text-white font-medium">{viewedUser?.name}</span>
+              Generating NAV report for: <span className="text-white font-medium">{viewedUser?.name || 'Unknown User'}</span>
             </p>
           </div>
         </div>
@@ -585,6 +819,181 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
           <p className="text-red-400 text-sm">{error}</p>
         </div>
       )}
+      
+      {/* Validation Warnings */}
+      {validationWarnings.length > 0 && (
+        <div className="space-y-2">
+          {validationWarnings.map((warning, index) => (
+            <div
+              key={index}
+              className={`border rounded-lg p-4 flex items-center ${
+                warning.type === 'error'
+                  ? 'bg-red-900/50 border-red-500'
+                  : warning.type === 'warning'
+                  ? 'bg-yellow-900/50 border-yellow-500'
+                  : 'bg-blue-900/50 border-blue-500'
+              }`}
+            >
+              <AlertCircle
+                className={`w-5 h-5 mr-3 ${
+                  warning.type === 'error'
+                    ? 'text-red-400'
+                    : warning.type === 'warning'
+                    ? 'text-yellow-400'
+                    : 'text-blue-400'
+                }`}
+              />
+              <p
+                className={`text-sm ${
+                  warning.type === 'error'
+                    ? 'text-red-400'
+                    : warning.type === 'warning'
+                    ? 'text-yellow-400'
+                    : 'text-blue-400'
+                }`}
+              >
+                {warning.message}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Prior Period NAV Helper */}
+      {hasAccess && (
+        <Card>
+          <div className="border-b border-gray-700 pb-4 mb-4">
+            <h3 className="text-lg font-semibold text-white mb-2">Prior Period NAV Setup</h3>
+            <p className="text-gray-400 text-sm">
+              Set the ending NAV from the previous month for accurate performance calculations.
+            </p>
+          </div>
+          
+          <div className="space-y-4">
+            {/* Current Prior NAV Display */}
+            <div className="bg-gray-800 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-white font-medium">Prior Period Pre-Fee NAV:</label>
+                <div className="flex items-center space-x-2">
+                  <span className="text-2xl font-mono text-green-400">
+                    ${(params.priorPreFeeNav || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <div className={`px-2 py-1 rounded text-xs ${
+                    params.priorPreFeeNavSource === 'auto_loaded' ? 'bg-green-900/50 text-green-400' :
+                    params.priorPreFeeNavSource === 'portfolio_estimate' ? 'bg-blue-900/50 text-blue-400' :
+                    params.priorPreFeeNavSource === 'fallback' ? 'bg-yellow-900/50 text-yellow-400' :
+                    'bg-gray-700 text-gray-300'
+                  }`}>
+                    {params.priorPreFeeNavSource === 'auto_loaded' && '🔄 Auto-loaded'}
+                    {params.priorPreFeeNavSource === 'portfolio_estimate' && '📊 Portfolio Est.'}
+                    {params.priorPreFeeNavSource === 'fallback' && '⚠️ Fallback'}
+                    {params.priorPreFeeNavSource === 'manual' && '✏️ Manual'}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Manual Input */}
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2 flex-1">
+                  <span className="text-white text-lg font-bold">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={params.priorPreFeeNav || 0}
+                    onChange={(e) => updateParam('priorPreFeeNav', parseFloat(e.target.value) || 0)}
+                    className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white font-mono"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            {/* Prior Period Data */}
+            {priorNavData && (
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-white font-medium">
+                    {priorNavData.priorMonthName} {priorNavData.priorYear} Data
+                  </h4>
+                  {isLoadingPriorNav && (
+                    <div className="flex items-center space-x-2 text-blue-400">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">Loading...</span>
+                    </div>
+                  )}
+                </div>
+                
+                {priorNavData.found ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400 text-sm">{priorNavData.message}</span>
+                      <Button
+                        onClick={handleLoadPriorNav}
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700"
+                        disabled={params.priorPreFeeNav === (priorNavData?.priorPreFeeNav || 0)}
+                      >
+                        {params.priorPreFeeNav === (priorNavData?.priorPreFeeNav || 0) ? '✓ Loaded' : 'Load Prior NAV'}
+                      </Button>
+                    </div>
+                    
+                    {priorNavData.priorSettings && (
+                      <div className="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-gray-700">
+                        <div className="text-center">
+                          <div className="text-gray-400 text-xs">Total Assets</div>
+                          <div className="text-white font-mono text-sm">
+                            ${(priorNavData.priorSettings?.totalAssets || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-gray-400 text-xs">Net Assets</div>
+                          <div className="text-white font-mono text-sm">
+                            ${(priorNavData.priorSettings?.netAssets || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-gray-400 text-xs">Performance</div>
+                          <div className={`font-mono text-sm ${
+                            priorNavData.priorSettings.performance >= 0 ? 'text-green-400' : 'text-red-400'
+                          }`}>
+                            ${(priorNavData.priorSettings?.performance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-yellow-400 text-sm">{priorNavData.message}</span>
+                      <Button
+                        onClick={handleUseCurrentPortfolio}
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        Use Current Portfolio Value
+                      </Button>
+                    </div>
+                    
+                    <div className="bg-blue-900/20 border border-blue-600 rounded p-3">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <div className="w-4 h-4 text-blue-400">ℹ</div>
+                        <span className="text-blue-400 font-medium text-sm">First Month Setup</span>
+                      </div>
+                      <p className="text-blue-300 text-sm">
+                        For the first month, you can use your current portfolio value 
+                        (${((portfolioData?.totalTokensValue || 0) + (portfolioData?.totalPositionsValue || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) 
+                        as the baseline, or manually enter the starting NAV.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Excel-Style NAV Report */}
       <Card>
@@ -622,7 +1031,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">Investments at fair value (securities)</td>
                   <td className="border border-gray-600 p-3 text-right text-green-400 font-mono">
-                    ${calculations.investments.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.investments || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="hover:bg-gray-800/50">
@@ -636,7 +1045,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">Dividends and interest receivable</td>
                   <td className="border border-gray-600 p-3 text-right text-green-400 font-mono">
-                    ${calculations.dividendsReceivable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.dividendsReceivable || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="hover:bg-gray-800/50">
@@ -653,7 +1062,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-white">Total Assets</td>
                   <td className="border border-gray-600 p-3 text-white"></td>
                   <td className="border border-gray-600 p-3 text-right text-green-400 font-mono text-lg">
-                    ${calculations.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.totalAssets || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
 
@@ -694,7 +1103,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                     </div>
                   </td>
                   <td className="border border-gray-600 p-3 text-right text-red-400 font-mono">
-                    ${calculations.accruedExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.accruedExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="hover:bg-gray-800/50">
@@ -711,7 +1120,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-white">Total Liabilities</td>
                   <td className="border border-gray-600 p-3 text-white"></td>
                   <td className="border border-gray-600 p-3 text-right text-red-400 font-mono text-lg">
-                    ${calculations.totalLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.totalLiabilities || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
 
@@ -725,7 +1134,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-white"></td>
                   <td className="border border-gray-600 p-3 text-white">Pre-Fee Ending NAV</td>
                   <td className="border border-gray-600 p-3 text-right text-blue-400 font-mono text-lg">
-                    ${calculations.preFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.preFeeNav || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="bg-yellow-900/30 hover:bg-yellow-900/40">
@@ -747,14 +1156,106 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                     </div>
                   </td>
                   <td className="border border-gray-600 p-3 text-right text-yellow-400 font-mono">
-                    ${calculations.accruedPerformanceFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.accruedPerformanceFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="bg-purple-900/40 font-bold text-xl">
                   <td className="border border-gray-600 p-4 text-white"></td>
                   <td className="border border-gray-600 p-4 text-white">NET ASSETS</td>
                   <td className="border border-gray-600 p-4 text-right text-purple-400 font-mono">
-                    ${calculations.netAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.netAssets || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+
+                {/* Empty row */}
+                <tr>
+                  <td colSpan={3} className="p-2"></td>
+                </tr>
+
+                {/* FEES PAYMENT STATUS Section */}
+                <tr className="bg-orange-900/30">
+                  <td colSpan={3} className="border border-gray-600 p-3 text-white font-bold text-center">
+                    FEES PAYMENT STATUS
+                  </td>
+                </tr>
+                <tr className="bg-orange-900/10 hover:bg-orange-900/20">
+                  <td className="border border-gray-600 p-3 text-gray-400"></td>
+                  <td className="border border-gray-600 p-3 text-white">
+                    Accrued Performance Fees Payment Status
+                    <div className="text-xs text-gray-400 mt-2 space-y-2">
+                      <div className="flex flex-col space-y-1">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="radio"
+                            name="feePaymentStatus"
+                            value="paid"
+                            checked={params.feePaymentStatus === 'paid'}
+                            onChange={(e) => updateParam('feePaymentStatus', e.target.value as any)}
+                            className="text-green-500"
+                          />
+                          <span className="text-green-400">Paid</span>
+                        </label>
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="radio"
+                            name="feePaymentStatus"
+                            value="not_paid"
+                            checked={params.feePaymentStatus === 'not_paid'}
+                            onChange={(e) => updateParam('feePaymentStatus', e.target.value as any)}
+                            className="text-red-500"
+                          />
+                          <span className="text-red-400">Not Paid</span>
+                        </label>
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="radio"
+                            name="feePaymentStatus"
+                            value="partially_paid"
+                            checked={params.feePaymentStatus === 'partially_paid'}
+                            onChange={(e) => updateParam('feePaymentStatus', e.target.value as any)}
+                            className="text-yellow-500"
+                          />
+                          <span className="text-yellow-400">Partially Paid</span>
+                        </label>
+                      </div>
+                      {params.feePaymentStatus === 'partially_paid' && (
+                        <div className="mt-2">
+                          <label className="text-xs text-gray-400">Partial Payment Amount:</label>
+                          <div className="flex items-center space-x-1 mt-1">
+                            <span className="text-white text-sm font-bold">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max={calculations?.calculatedAccruedFees || 999999999}
+                              value={params.partialPaymentAmount || 0}
+                              onChange={(e) => updateParam('partialPaymentAmount', parseFloat(e.target.value) || 0)}
+                              className="w-24 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-sm font-mono"
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Max: ${(calculations?.calculatedAccruedFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      )}
+                      <div className="mt-2 p-2 bg-gray-700 rounded text-xs">
+                        <div>Calculated Fee: ${(calculations?.calculatedAccruedFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div>Applied Fee: ${(calculations?.accruedPerformanceFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="border border-gray-600 p-3 text-right">
+                    <div className="space-y-1">
+                      <div className="text-sm text-white">
+                        {params.feePaymentStatus === 'paid' && <span className="text-green-400">✓ Paid</span>}
+                        {params.feePaymentStatus === 'not_paid' && <span className="text-red-400">✗ Not Paid</span>}
+                        {params.feePaymentStatus === 'partially_paid' && <span className="text-yellow-400">⚬ Partial</span>}
+                      </div>
+                      <div className="text-xs text-gray-400 font-mono">
+                        Applied: ${(calculations?.accruedPerformanceFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
                   </td>
                 </tr>
 
@@ -773,14 +1274,34 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">
                     Prior period Pre-Fee Ending NAV
-                    <div className="text-xs text-gray-400 mt-1">
-                      <input
-                        type="number"
-                        value={params.priorPreFeeNav || 0}
-                        onChange={(e) => updateParam('priorPreFeeNav', parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
-                        placeholder="0"
-                      />
+                    <div className="text-xs text-gray-400 mt-1 space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-white text-sm font-bold">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={params.priorPreFeeNav || 0}
+                          onChange={(e) => updateParam('priorPreFeeNav', parseFloat(e.target.value) || 0)}
+                          className="w-32 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-sm font-mono"
+                          placeholder="0.00"
+                        />
+                        <div className={`px-2 py-1 rounded text-xs ${
+                          params.priorPreFeeNavSource === 'auto_loaded' ? 'bg-green-900/50 text-green-400' :
+                          params.priorPreFeeNavSource === 'portfolio_estimate' ? 'bg-blue-900/50 text-blue-400' :
+                          params.priorPreFeeNavSource === 'fallback' ? 'bg-yellow-900/50 text-yellow-400' :
+                          'bg-gray-700 text-gray-300'
+                        }`}>
+                          {params.priorPreFeeNavSource === 'auto_loaded' && 'Auto-loaded'}
+                          {params.priorPreFeeNavSource === 'portfolio_estimate' && 'Portfolio Est.'}
+                          {params.priorPreFeeNavSource === 'fallback' && 'Fallback'}
+                          {params.priorPreFeeNavSource === 'manual' && 'Manual'}
+                        </div>
+                      </div>
+                      {priorNavData && priorNavData.found && (
+                        <div className="text-xs text-green-400">
+                          Available: ${(priorNavData?.priorPreFeeNav || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from {priorNavData?.priorMonthName || ''} {priorNavData?.priorYear || ''}
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td className="border border-gray-600 p-3 text-right text-white font-mono">
@@ -791,14 +1312,37 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">
                     Net Flows
-                    <div className="text-xs text-gray-400 mt-1">
-                      <input
-                        type="number"
-                        value={params.netFlows || 0}
-                        onChange={(e) => updateParam('netFlows', parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
-                        placeholder="0"
-                      />
+                    <div className="text-xs text-gray-400 mt-1 space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-white text-sm font-bold">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={params.netFlows || 0}
+                          onChange={(e) => {
+                            const value = parseFloat(e.target.value) || 0;
+                            // Add validation for reasonable net flow values
+                            if (Math.abs(value) <= 10000000) { // 10M limit
+                              updateParam('netFlows', value);
+                            }
+                          }}
+                          className="w-32 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-sm font-mono"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        <strong>Deposits: +$amount</strong> | <strong>Withdrawals: -$amount</strong>
+                      </div>
+                      <div className="text-xs text-blue-400">
+                        Example: -30000 = $30,000 withdrawn from portfolio
+                      </div>
+                      <div className="text-xs font-medium ${
+                        (params.netFlows || 0) >= 0 ? 'text-green-400' : 'text-red-400'
+                      }">
+                        Current: {(params.netFlows || 0) >= 0 
+                          ? `+$${Math.abs(params.netFlows || 0).toLocaleString()} deposited` 
+                          : `-$${Math.abs(params.netFlows || 0).toLocaleString()} withdrawn`}
+                      </div>
                     </div>
                   </td>
                   <td className="border border-gray-600 p-3 text-right text-white font-mono">
@@ -809,45 +1353,64 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">Current period Pre-Fee Ending NAV</td>
                   <td className="border border-gray-600 p-3 text-right text-blue-400 font-mono">
-                    ${calculations.preFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.preFeeNav || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="bg-green-900/30 hover:bg-green-900/40">
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white font-bold">Performance</td>
                   <td className="border border-gray-600 p-3 text-right text-green-400 font-mono font-bold">
-                    ${calculations.performance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.performance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="bg-yellow-900/20 hover:bg-yellow-900/30">
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">
                     Hurdle Rate
-                    <div className="text-xs text-gray-400 mt-1">
-                      <input
-                        type="number"
-                        value={params.hurdleRate || 0}
-                        onChange={(e) => updateParam('hurdleRate', parseFloat(e.target.value) || 0)}
-                        className="w-20 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
-                        placeholder="0"
-                      />
+                    <div className="text-xs text-gray-400 mt-1 space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={params.hurdleRate || 0}
+                          onChange={(e) => updateParam('hurdleRate', parseFloat(e.target.value) || 0)}
+                          className="w-16 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
+                          placeholder="0"
+                        />
+                        <span>%</span>
+                        <select
+                          value={params.hurdleRateType}
+                          onChange={(e) => updateParam('hurdleRateType', e.target.value as 'annual' | 'monthly')}
+                          className="bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
+                        >
+                          <option value="annual">Annual</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        Dollar amount: ${(calculations?.hurdleAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
                     </div>
                   </td>
                   <td className="border border-gray-600 p-3 text-right text-white font-mono">
-                    ${(params.hurdleRate || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {params.hurdleRate || 0}% {params.hurdleRateType}
                   </td>
                 </tr>
                 <tr className="bg-yellow-900/20 hover:bg-yellow-900/30">
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">
                     High Water Mark
-                    <div className="text-xs text-gray-400 mt-1">
+                    <div className="text-xs text-gray-400 mt-1 flex items-center space-x-2">
+                      <span className="text-white text-sm font-bold">$</span>
                       <input
                         type="number"
+                        step="0.01"
                         value={params.highWaterMark || 0}
                         onChange={(e) => updateParam('highWaterMark', parseFloat(e.target.value) || 0)}
-                        className="w-20 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
-                        placeholder="0"
+                        className="w-24 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-sm font-mono"
+                        placeholder="0.00"
                       />
                     </div>
                   </td>
@@ -874,14 +1437,14 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                     </div>
                   </td>
                   <td className="border border-gray-600 p-3 text-right text-red-400 font-mono">
-                    ${calculations.performanceFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.performanceFee || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
                 <tr className="bg-yellow-900/30 hover:bg-yellow-900/40">
                   <td className="border border-gray-600 p-3 text-gray-400"></td>
                   <td className="border border-gray-600 p-3 text-white">Accrued Performance Fees</td>
                   <td className="border border-gray-600 p-3 text-right text-yellow-400 font-mono">
-                    ${calculations.accruedPerformanceFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${(calculations?.accruedPerformanceFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tbody>
@@ -899,19 +1462,19 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
           <div className="bg-gray-800 p-3 rounded">
             <p className="text-gray-400">Token Holdings</p>
             <p className="text-green-400 font-mono text-lg">
-              ${portfolioData.totalTokensValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${(portfolioData?.totalTokensValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className="bg-gray-800 p-3 rounded">
             <p className="text-gray-400">DeFi Positions</p>
             <p className="text-purple-400 font-mono text-lg">
-              ${portfolioData.totalPositionsValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${(portfolioData?.totalPositionsValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
           <div className="bg-gray-800 p-3 rounded">
             <p className="text-gray-400">Unclaimed Rewards</p>
             <p className="text-yellow-400 font-mono text-lg">
-              ${portfolioData.totalRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${(portfolioData?.totalRewards || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
           </div>
         </div>

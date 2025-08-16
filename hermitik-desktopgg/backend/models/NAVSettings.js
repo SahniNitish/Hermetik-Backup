@@ -37,9 +37,28 @@ const NAVSettingsSchema = new mongoose.Schema({
       type: Number,
       default: 0
     },
+    hurdleRateType: {
+      type: String,
+      enum: ['annual', 'monthly'],
+      default: 'annual'
+    },
     highWaterMark: {
       type: Number,
       default: 0
+    },
+    feePaymentStatus: {
+      type: String,
+      enum: ['paid', 'not_paid', 'partially_paid'],
+      default: 'not_paid'
+    },
+    partialPaymentAmount: {
+      type: Number,
+      default: 0
+    },
+    priorPreFeeNavSource: {
+      type: String,
+      enum: ['manual', 'auto_loaded', 'fallback', 'portfolio_estimate'],
+      default: 'manual'
     }
   },
   navCalculations: {
@@ -86,6 +105,26 @@ const NAVSettingsSchema = new mongoose.Schema({
     netFlows: {
       type: Number,
       default: 0
+    },
+    priorPreFeeNav: {
+      type: Number,
+      default: 0
+    },
+    hurdleAmount: {
+      type: Number,
+      default: 0
+    },
+    validationWarnings: [{
+      type: String
+    }],
+    calculationDate: {
+      type: Date,
+      default: Date.now
+    },
+    priorPreFeeNavSource: {
+      type: String,
+      enum: ['manual', 'auto_loaded', 'fallback', 'portfolio_estimate'],
+      default: 'manual'
     }
   },
   portfolioData: {
