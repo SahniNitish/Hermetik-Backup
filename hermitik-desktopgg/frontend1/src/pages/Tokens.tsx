@@ -231,12 +231,8 @@ const Tokens: React.FC = () => {
 
       {/* Summary */}
       <Card>
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-gray-400">Total Token Value</p>
-            <p className="text-2xl font-bold text-white">${totalPortfolioValue.toLocaleString()}</p>
-          </div>
-          <div className="text-right">
+        <div className="flex justify-center items-center">
+          <div className="text-center">
             <p className="text-gray-400">Tokens Tracked</p>
             <p className="text-2xl font-bold text-white">{filteredTokens.length}</p>
           </div>

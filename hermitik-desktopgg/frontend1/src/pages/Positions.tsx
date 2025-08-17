@@ -1,109 +1,55 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { walletApi } from '../services/api';
-import { Search, Filter, TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
 import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
-import DataTable from '../components/UI/DataTable';
-import AccordionDataTable from '../components/UI/AccordionDataTable';
 import AdminViewBanner from '../components/Admin/AdminViewBanner';
 import { useUserView } from '../contexts/UserViewContext';
-import { Protocol, Token } from '../types';
+import { Protocol, Wallet } from '../types';
 
 const Positions: React.FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedChain, setSelectedChain] = useState('all');
 
   const { viewedUser } = useUserView();
 
-  const { data: wallets, isLoading, error } = useQuery({
+  const { data: wallets, isLoading, error } = useQuery<Wallet[]>({
     queryKey: ['wallets', viewedUser?.id],
     queryFn: () => {
-      console.log('🔄 Fetching wallet data...');
       // If admin is viewing as a user, fetch that user's wallets
       if (viewedUser) {
-        console.log('👤 Admin viewing user:', viewedUser.id);
         return walletApi.getUserWallets(viewedUser.id);
       }
-      console.log('👤 Fetching current user wallets');
       return walletApi.getWallets();
     },
-    refetchInterval: 30000,
-    onSuccess: (data) => {
-      console.log('✅ Wallet API Success - Raw data:', data);
-    },
-    onError: (err) => {
-      console.error('❌ Wallet API Error:', err);
-    }
+    refetchInterval: 30000
   });
 
-  // Debug APY query conditions
-  const hasToken = !!localStorage.getItem('access_token');
-  const hasWallets = !!wallets;
-  const apyQueryEnabled = hasToken && hasWallets;
-  
-  console.log('🔍 APY Query Debug:');
-  console.log('  - Has token:', hasToken);
-  console.log('  - Has wallets:', hasWallets);
-  console.log('  - Query enabled:', apyQueryEnabled);
-  console.log('  - Viewed user:', viewedUser?.id);
-  
-  // Force APY query to run immediately for testing
-  if (apyQueryEnabled) {
-    console.log('🔧 APY Query should be running now...');
-  }
-
-  // Fetch position APY data
-  const { data: positionAPYs, isLoading: isLoadingAPY, error: apyError } = useQuery({
+  // Fetch position APY data for the APY display component
+  const { data: positionAPYs } = useQuery({
     queryKey: ['positionAPYs', viewedUser?.id],
     queryFn: async () => {
-      console.log('🚀 QUERYFUNCTION CALLED! Fetching APY data for user:', viewedUser?.id);
-      console.log('🔑 Using token:', localStorage.getItem('access_token') ? 'Token exists' : 'No token');
-      
       try {
-        
         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`
           }
         });
         
-        console.log('📡 APY API Response status:', response.status);
-        
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ APY API Error:', response.status, errorText);
           throw new Error(`Failed to fetch position APYs: ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('✅ APY API Success - Raw response:', data);
-        console.log('📊 Position count:', data.positionCount);
-        
         return data;
       } catch (error) {
         console.error('❌ Position APYs error:', error);
         return null;
       }
     },
-    enabled: apyQueryEnabled,
+    enabled: !!localStorage.getItem('access_token') && !!wallets,
     refetchInterval: 300000, // Refresh every 5 minutes
     staleTime: 240000 // Consider data stale after 4 minutes
   });
-
-  // Debug APY query state
-  console.log('📊 APY Query State:');
-  console.log('  - isLoading:', isLoadingAPY);
-  console.log('  - data:', positionAPYs);
-  console.log('  - error:', apyError);
-  
-  // Check user ID mismatch
-  if (positionAPYs && positionAPYs.userId !== viewedUser?.id) {
-    console.log('⚠️ USER ID MISMATCH!');
-    console.log('  - Frontend viewing:', viewedUser?.id);
-    console.log('  - API returned data for:', positionAPYs.userId);
-    console.log('  - APY positions:', positionAPYs.positions);
-  }
 
   if (isLoading) {
     return (
@@ -121,7 +67,7 @@ const Positions: React.FC = () => {
     );
   }
 
-  if (!wallets || wallets.length === 0) {
+  if (!wallets || !Array.isArray(wallets) || wallets.length === 0) {
     return (
       <div className="text-center py-12">
         <p className="text-gray-400">No wallets found. Add a wallet to see your DeFi positions.</p>
@@ -130,115 +76,45 @@ const Positions: React.FC = () => {
     );
   }
 
-  // Debug: Log the raw wallet data to understand the structure
-  console.log('=== RAW WALLET DATA ===');
-  console.log(`Total wallets: ${wallets.length}`);
-  
-  // Look specifically for the hello wallet with Uniswap V4 position
-  const helloWallet = wallets.find(w => w.address === '0xbfa2ef4cab56ace20a4e11bb6080a09d126bf5cd');
-  if (helloWallet) {
-    console.log('🔍 FOUND HELLO WALLET:', helloWallet.address);
-    console.log('  Total protocols:', helloWallet.protocols?.length || 0);
-    console.log('  Wallet total value: $', helloWallet.totalValue || 0);
-    
-    // Look for Uniswap protocols
-    const uniswapProtocols = helloWallet.protocols?.filter(p => 
-      p.name?.toLowerCase().includes('uniswap') || 
-      p.protocol_id?.toLowerCase().includes('uniswap')
-    ) || [];
-    
-    console.log('🦄 Uniswap protocols found:', uniswapProtocols.length);
-    uniswapProtocols.forEach((protocol, idx) => {
-      console.log(`  Uniswap ${idx + 1}:`, {
-        name: protocol.name,
-        protocol_id: protocol.protocol_id,
-        chain: protocol.chain,
-        net_usd_value: protocol.net_usd_value,
-        positions_count: protocol.positions?.length || 0
-      });
-      
-      protocol.positions?.forEach((pos, posIdx) => {
-        console.log(`    Position ${posIdx + 1}: ${pos.position_name}`);
-        console.log(`      Tokens:`, pos.tokens?.map(t => ({
-          symbol: t.symbol, 
-          amount: t.amount, 
-          usd_value: t.usd_value
-        })));
-        console.log(`      Rewards:`, pos.rewards?.map(r => ({
-          symbol: r.symbol, 
-          amount: r.amount, 
-          usd_value: r.usd_value
-        })));
-      });
-    });
-  } else {
-    console.log('❌ Hello wallet not found in wallets array');
-  }
-  
-  wallets.forEach((wallet, walletIndex) => {
-    console.log(`Wallet ${walletIndex + 1} (${wallet.address}):`);
-    console.log(`  Protocols: ${wallet.protocols?.length || 0}, Total Value: $${wallet.totalValue || 0}`);
-    
-    // Log high-value protocols specifically
-    const highValueProtocols = wallet.protocols?.filter(p => p.net_usd_value > 1000) || [];
-    if (highValueProtocols.length > 0) {
-      console.log(`  🔥 HIGH VALUE PROTOCOLS (${highValueProtocols.length}):`);
-      highValueProtocols.forEach(protocol => {
-        console.log(`    ${protocol.name}: $${protocol.net_usd_value} (${protocol.positions?.length || 0} positions)`);
-      });
-    }
-  });
 
   // Flatten all protocols from all wallets and deduplicate
-  const allProtocolsFlat = wallets.flatMap(wallet => 
-    wallet.protocols.map(protocol => ({
+  const allProtocolsFlat = (wallets || []).flatMap((wallet: Wallet) => 
+    (wallet.protocols || []).map((protocol: Protocol) => ({
       ...protocol,
-      sourceWallet: wallet.address // Add source wallet for debugging
+      sourceWallet: wallet.address // Add source wallet for APY lookup
     }))
   );
   
-  // Debug: Show all flattened protocols
-  console.log('=== FLATTENED PROTOCOLS ===');
-  console.log(`Total flattened protocols: ${allProtocolsFlat.length}`);
-  allProtocolsFlat.forEach((protocol, index) => {
-    console.log(`${index + 1}. ${protocol.name} (${protocol.protocol_id}) from wallet ${protocol.sourceWallet}`);
-    console.log(`   Net USD Value: $${protocol.net_usd_value}`);
-    console.log(`   Positions: ${protocol.positions?.length || 0}`);
-  });
-  
-  // Deduplicate protocols by protocol name only (consolidate across chains)
+  // Deduplicate protocols by protocol name and chain
   const uniqueProtocolsMap = new Map<string, Protocol & { sourceWallet?: string }>();
-  allProtocolsFlat.forEach(protocol => {
-    const key = protocol.name; // Group by name only, not by chain
-    console.log(`Processing protocol key: ${key} for ${protocol.name}`);
+  allProtocolsFlat.forEach((protocol: Protocol & { sourceWallet?: string }) => {
+    const key = `${protocol.name}-${protocol.chain}`;
     
     if (!uniqueProtocolsMap.has(key)) {
       uniqueProtocolsMap.set(key, protocol);
-      console.log(`  -> Added new protocol: ${protocol.name}`);
     } else {
-      console.log(`  -> Found duplicate, merging with existing ${protocol.name}`);
       // If we have a duplicate, merge the positions and values
       const existing = uniqueProtocolsMap.get(key)!;
       existing.net_usd_value += protocol.net_usd_value;
       
       // Merge positions (deduplicate by position name + chain to avoid merging different positions)
-      protocol.positions.forEach(newPosition => {
+      (protocol.positions || []).forEach((newPosition: any) => {
         const positionKey = `${newPosition.position_name}-${newPosition.chain || protocol.chain}`;
         const existingPosition = existing.positions.find(p => 
           `${p.position_name}-${p.chain || protocol.chain}` === positionKey
         );
         
         if (!existingPosition) {
+          existing.positions = existing.positions || [];
           existing.positions.push(newPosition);
-          console.log(`    -> Added new position: ${newPosition.position_name} (${newPosition.chain || protocol.chain})`);
         } else {
-          console.log(`    -> Merging position: ${newPosition.position_name} (${newPosition.chain || protocol.chain})`);
           // Merge tokens and rewards in the position
-          newPosition.tokens.forEach(token => {
-            const existingToken = existingPosition.tokens.find(t => 
-              t.symbol === token.symbol && t.chain === token.chain
+          (newPosition.tokens || []).forEach((token: any) => {
+            const existingToken = (existingPosition.tokens || []).find((t: any) => 
+              t.symbol === token.symbol
             );
             if (!existingToken) {
+              existingPosition.tokens = existingPosition.tokens || [];
               existingPosition.tokens.push(token);
             } else {
               existingToken.amount += token.amount;
@@ -246,11 +122,12 @@ const Positions: React.FC = () => {
             }
           });
           
-          newPosition.rewards.forEach(reward => {
-            const existingReward = existingPosition.rewards.find(r => 
-              r.symbol === reward.symbol && r.chain === reward.chain
+          (newPosition.rewards || []).forEach((reward: any) => {
+            const existingReward = (existingPosition.rewards || []).find((r: any) => 
+              r.symbol === reward.symbol
             );
             if (!existingReward) {
+              existingPosition.rewards = existingPosition.rewards || [];
               existingPosition.rewards.push(reward);
             } else {
               existingReward.amount += reward.amount;
@@ -262,224 +139,10 @@ const Positions: React.FC = () => {
     }
   });
   
-  const allProtocols: Protocol[] = Array.from(uniqueProtocolsMap.values()).map(protocol => {
-    const { sourceWallet, ...cleanProtocol } = protocol;
-    return cleanProtocol;
-  });
-  
-  // Debug logging to help track deduplication
-  console.log(`=== DEDUPLICATION SUMMARY ===`);
-  console.log(`Total protocols before deduplication: ${allProtocolsFlat.length}`);
-  console.log(`Unique protocols after deduplication: ${allProtocols.length}`);
-  console.log('Final protocols:', allProtocols.map(p => `${p.name} (${p.protocol_id})`));
+  const allProtocols: (Protocol & { sourceWallet?: string })[] = Array.from(uniqueProtocolsMap.values());
 
-  // Get unique chains for filter
-  const chains = Array.from(new Set(allProtocols.map(protocol => protocol.chain)));
 
-  // Filter protocols - temporarily show ALL positions to debug what's available
-  const filteredProtocols = allProtocols.filter(protocol => {
-    const matchesSearch = protocol.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesChain = selectedChain === 'all' || protocol.chain === selectedChain;
-    const hasValue = true; // Temporarily show ALL positions including zero value ones for debugging
-    return matchesSearch && matchesChain && hasValue;
-  });
 
-  const totalPositionsValue = filteredProtocols.reduce((sum, protocol) => sum + protocol.net_usd_value, 0);
-
-  // Extract all unique tokens from all wallets
-  const allTokens = wallets.flatMap(wallet => wallet.tokens.map(token => ({ ...token, wallet: wallet.address })));
-  const uniqueTokens = allTokens.reduce((acc, token) => {
-    const key = `${token.symbol}-${token.chain}`;
-    if (acc[key]) {
-      acc[key].amount += token.amount;
-      acc[key].usd_value += token.usd_value;
-    } else {
-      acc[key] = { ...token };
-    }
-    return acc;
-  }, {} as Record<string, Token & { wallet?: string }>);
-  // Filter tokens - temporarily show ALL tokens to debug what's available
-  const tokensArray: (Token & { wallet?: string })[] = Object.values(uniqueTokens).filter(token => true); // Show all tokens for debugging
-  const totalTokensValue: number = tokensArray.reduce((sum: number, token: Token & { wallet?: string }) => sum + token.usd_value, 0);
-
-  // Prepare tokens table data  
-  const tokensTableData = tokensArray.map(token => ({
-    chain: token.chain.toUpperCase(),
-    ticker: token.symbol,
-    symbol: token.name,
-    amount: token.amount.toLocaleString(undefined, { maximumFractionDigits: 6 }),
-    price: `$${token.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`,
-    usd_value: `$${token.usd_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-  }));
-
-  // Prepare hierarchical positions data grouped by protocol (matching Excel format)
-  const protocolPositions = filteredProtocols.map(protocol => {
-    console.log(`Processing protocol: ${protocol.name}`);
-    
-    // Aggregate all position tokens with deduplication
-    const positionTokensMap = new Map<string, any>();
-    const rewardTokensMap = new Map<string, any>();
-    
-    // Collect position names and wallet addresses for APY lookup
-    const protocolWithSource = protocol as Protocol & { sourceWallet?: string };
-    const protocolPositionInfo = {
-      positions: protocol.positions.map(pos => pos.position_name),
-      walletAddresses: [protocolWithSource.sourceWallet || ''] // Use source wallet if available
-    };
-    
-    protocol.positions.forEach(position => {
-      // Process position tokens
-      position.tokens.forEach(token => {
-        const key = token.symbol;
-        const price = token.amount > 0 ? token.usd_value / token.amount : 0;
-        
-        if (!positionTokensMap.has(key)) {
-          positionTokensMap.set(key, {
-            ticker: token.symbol,
-            symbol: token.symbol,
-            amount: token.amount,
-            usd_value: token.usd_value,
-            price: price
-          });
-        } else {
-          // Merge duplicate tokens
-          const existing = positionTokensMap.get(key)!;
-          existing.amount += token.amount;
-          existing.usd_value += token.usd_value;
-          existing.price = existing.amount > 0 ? existing.usd_value / existing.amount : 0;
-        }
-      });
-      
-      // Process reward tokens
-      position.rewards.forEach(reward => {
-        const key = reward.symbol;
-        const price = reward.amount > 0 ? reward.usd_value / reward.amount : 0;
-        
-        if (!rewardTokensMap.has(key)) {
-          rewardTokensMap.set(key, {
-            ticker: reward.symbol,
-            symbol: reward.symbol,
-            amount: reward.amount,
-            usd_value: reward.usd_value,
-            price: price,
-            isReward: true
-          });
-        } else {
-          // Merge duplicate rewards
-          const existing = rewardTokensMap.get(key)!;
-          existing.amount += reward.amount;
-          existing.usd_value += reward.usd_value;
-          existing.price = existing.amount > 0 ? existing.usd_value / existing.amount : 0;
-        }
-      });
-    });
-    
-    // Calculate NAV for positions and rewards (before formatting)
-    const positionNavValue = Array.from(positionTokensMap.values()).reduce((sum, token) => sum + token.usd_value, 0);
-    const rewardNavValue = Array.from(rewardTokensMap.values()).reduce((sum, reward) => sum + reward.usd_value, 0);
-    
-    // Debug NAV calculations
-    console.log(`=== PROTOCOL ${protocol.name} NAV CALCULATION ===`);
-    console.log(`Position tokens:`, Array.from(positionTokensMap.values()));
-    console.log(`Calculated position NAV: $${positionNavValue.toLocaleString()}`);
-    console.log(`Reward tokens:`, Array.from(rewardTokensMap.values()));
-    console.log(`Calculated reward NAV: $${rewardNavValue.toLocaleString()}`);
-    console.log(`Total calculated NAV: $${(positionNavValue + rewardNavValue).toLocaleString()}`);
-    
-    // Format position tokens for display (no adjustment needed - use calculated values)
-    const positionData = Array.from(positionTokensMap.values()).map(token => ({
-      ticker: token.ticker,
-      symbol: token.symbol,
-      amount: token.amount.toLocaleString(undefined, { maximumFractionDigits: 6 }),
-      price: `$${token.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`,
-      usd_value: `$${token.usd_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-    }));
-    
-    // Format reward tokens for display (no adjustment needed - use calculated values)
-    const rewardData = Array.from(rewardTokensMap.values()).map(reward => ({
-      ticker: reward.ticker,
-      symbol: reward.symbol,
-      amount: reward.amount.toLocaleString(undefined, { maximumFractionDigits: 6 }),
-      price: `$${reward.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`,
-      usd_value: `$${reward.usd_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-      isReward: true
-    }));
-    
-    // Use calculated NAVs directly (no adjustment needed)
-    const finalPositionNav = positionNavValue;
-    const finalRewardNav = rewardNavValue;
-    
-    console.log(`Final position NAV: $${finalPositionNav.toLocaleString()}`);
-    console.log(`Final reward NAV: $${finalRewardNav.toLocaleString()}`);
-    
-    // Verify row-level values sum to section totals
-    const positionRowsTotal = positionData.reduce((sum, row) => {
-      const value = parseFloat(row.usd_value.replace(/[$,]/g, ''));
-      return sum + value;
-    }, 0);
-    const rewardRowsTotal = rewardData.reduce((sum, row) => {
-      const value = parseFloat(row.usd_value.replace(/[$,]/g, ''));
-      return sum + value;
-    }, 0);
-    
-    console.log(`Position rows total: $${positionRowsTotal.toLocaleString()}`);
-    console.log(`Reward rows total: $${rewardRowsTotal.toLocaleString()}`);
-    console.log(`Position NAV match: ${Math.abs(positionRowsTotal - finalPositionNav) < 0.01}`);
-    console.log(`Reward NAV match: ${Math.abs(rewardRowsTotal - finalRewardNav) < 0.01}`);
-    
-    // Create sections for this protocol
-    const sections = [];
-    
-    if (positionData.length > 0) {
-      sections.push({
-        title: 'Position',
-        data: positionData,
-        navValue: `$${finalPositionNav.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-      });
-    }
-    
-    if (rewardData.length > 0) {
-      sections.push({
-        title: 'Rewards',
-        data: rewardData,
-        navValue: `$${finalRewardNav.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-      });
-    }
-    
-    // Use the calculated total instead of protocol.net_usd_value (which may be 0)
-    const calculatedTotal = finalPositionNav + finalRewardNav;
-    
-    return {
-      protocol,
-      sections,
-      totalNavValue: calculatedTotal,
-      positionInfo: protocolPositionInfo // Include position info for APY lookups
-    };
-  });
-
-  // Recalculate total positions value from the new hierarchical structure
-  const finalTotalPositionsValue = protocolPositions.reduce((sum, item) => sum + item.totalNavValue, 0);
-  
-  // Debug total calculations
-  console.log(`=== TOTAL NAV CALCULATION ===`);
-  console.log(`Original total positions value: $${totalPositionsValue.toLocaleString()}`);
-  console.log(`Calculated final total: $${finalTotalPositionsValue.toLocaleString()}`);
-  console.log(`Individual protocol NAVs:`, protocolPositions.map(p => ({
-    name: p.protocol.name,
-    nav: p.totalNavValue
-  })));
-  console.log(`Sum check: $${protocolPositions.reduce((sum, item) => sum + item.totalNavValue, 0).toLocaleString()}`);
-  
-  // Verify our calculations match
-  const shouldEqual = finalTotalPositionsValue === totalPositionsValue;
-  console.log(`Final calculations match original: ${shouldEqual}`);
-  
-  // Additional debug: Check what we're actually passing to the AccordionDataTable
-  console.log('=== PROTOCOL POSITIONS FOR TABLE ===');
-  console.log(`Number of protocol positions: ${protocolPositions.length}`);
-  protocolPositions.forEach((item, index) => {
-    console.log(`${index + 1}. ${item.protocol.name} - ${item.sections.length} sections - $${item.totalNavValue}`);
-  });
 
   // Generate position IDs for APY lookup using Debank position IDs
   const generatePositionId = (protocolName: string, positionName: string, walletAddress: string, debankPositionId?: string): string => {
@@ -490,32 +153,19 @@ const Positions: React.FC = () => {
   // Create APY lookup map
   const apyLookup = new Map();
   if (positionAPYs?.success && positionAPYs.positions) {
-    console.log('🗺️ Creating APY lookup map:');
     Object.entries(positionAPYs.positions).forEach(([positionId, apyData]) => {
-      console.log(`  - ${positionId}:`, apyData?.daily?.apy || 'No daily APY');
       apyLookup.set(positionId, apyData);
     });
-    console.log(`📊 APY lookup map created with ${apyLookup.size} positions`);
   }
 
   // Helper component to display APY data
-  const APYDisplay = ({ protocolName, positionName, walletAddress, debankPositionId }: { 
+  const APYDisplay = ({ protocolName, positionName, walletAddress }: { 
     protocolName: string, 
     positionName: string, 
-    walletAddress: string,
-    debankPositionId?: string 
+    walletAddress: string
   }) => {
-    const positionId = generatePositionId(protocolName, positionName, walletAddress, debankPositionId);
+    const positionId = generatePositionId(protocolName, positionName, walletAddress);
     const apyData = apyLookup.get(positionId);
-    
-    console.log(`🔍 APYDisplay lookup for ${protocolName}/${positionName}:`);
-    console.log(`  - Generated ID: ${positionId}`);
-    console.log(`  - Found APY data:`, apyData ? 'YES' : 'NO');
-    console.log(`  - Debank ID: ${debankPositionId || 'None'}`);
-    
-    if (apyData) {
-      console.log(`  - Daily APY: ${apyData.daily?.apy || 'No daily APY'}`);
-    }
 
     if (!apyData) {
       return (
@@ -615,167 +265,151 @@ const Positions: React.FC = () => {
       
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">DeFi Positions</h1>
-        <p className="text-gray-600 dark:text-gray-400">Track your lending, liquidity, and yield farming positions</p>
+        <p className="text-gray-600 dark:text-gray-400">Your current DeFi positions across all protocols</p>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search protocols..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex items-center space-x-2">
-            <Filter className="w-4 h-4 text-gray-400" />
-            <select
-              value={selectedChain}
-              onChange={(e) => setSelectedChain(e.target.value)}
-              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Chains</option>
-              {chains.map(chain => (
-                <option key={chain} value={chain}>{chain}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </Card>
-
-      {/* APY Status Indicator */}
-      {isLoadingAPY ? (
-        <Card>
-          <div className="flex items-center justify-center py-4">
-            <LoadingSpinner size="sm" />
-            <span className="text-gray-400 ml-3">Loading APY data...</span>
-          </div>
-        </Card>
-      ) : positionAPYs?.success ? (
-        <Card>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <BarChart3 className="w-5 h-5 mr-2 text-green-500" />
-              <div>
-                <h3 className="text-sm font-medium text-white">APY Data Available</h3>
-                <p className="text-xs text-gray-400">
-                  Showing performance data for {positionAPYs.positionCount} positions
-                </p>
-              </div>
-            </div>
-            <div className="text-xs text-gray-500">
-              Updated: {new Date().toLocaleTimeString()}
-            </div>
-          </div>
-        </Card>
-      ) : (
-        <Card>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <BarChart3 className="w-5 h-5 mr-2 text-gray-500" />
-              <div>
-                <h3 className="text-sm font-medium text-gray-400">APY Data Not Available</h3>
-                <p className="text-xs text-gray-500">
-                  Position performance tracking requires historical data collection. New positions will show immediate APY.
-                </p>
-              </div>
-            </div>
-            <div className="text-xs text-gray-600">
-              Daily snapshots needed
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* TOKENS Section */}
-      <DataTable
-        columns={tokensColumns}
-        data={tokensTableData}
-        title="TOKENS"
-        totalLabel="Tokens NAV"
-        totalValue={`$${totalTokensValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-        showTotal
-      />
-
-      {/* POSITIONS Section */}
+      {/* Protocol Positions Display */}
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">POSITIONS</h2>
-          <p className="text-gray-600 dark:text-gray-400 text-sm">Click on protocols and sections to expand/collapse</p>
-        </div>
-        <AccordionDataTable
-          columns={positionsColumns}
-          data={protocolPositions}
-          className="mb-4"
-        />
+        {allProtocols.map((protocol) => {
+          const totalPositionsValue = (protocol.positions || []).reduce((protocolSum, position) => {
+            const positionTokensValue = (position.tokens || []).reduce((sum, token) => sum + (token.usd_value || 0), 0);
+            const rewardTokensValue = (position.rewards || []).reduce((sum, reward) => sum + (reward.usd_value || 0), 0);
+            return protocolSum + positionTokensValue + rewardTokensValue;
+          }, 0);
+
+          if (totalPositionsValue === 0) return null;
+
+          return (
+            <Card key={protocol.protocol_id}>
+              <div className="space-y-6">
+                {/* Protocol Header */}
+                <div className="flex items-center justify-between border-b border-gray-700 pb-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-white">{protocol.name}</h2>
+                    <p className="text-sm text-gray-400">{protocol.chain} • {protocol.positions?.length || 0} positions</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-white">
+                      ${totalPositionsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </p>
+                    <p className="text-sm text-gray-400">Total Value</p>
+                  </div>
+                </div>
+
+                {/* Positions */}
+                <div className="space-y-4">
+                  {protocol.positions?.map((position, posIdx) => {
+                    const positionTokensValue = (position.tokens || []).reduce((sum, token) => sum + (token.usd_value || 0), 0);
+                    const rewardTokensValue = (position.rewards || []).reduce((sum, reward) => sum + (reward.usd_value || 0), 0);
+                    const totalPositionValue = positionTokensValue + rewardTokensValue;
+
+                    if (totalPositionValue === 0) return null;
+
+                    return (
+                      <div key={posIdx} className="bg-gray-800 rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <h3 className="text-lg font-semibold text-white">{position.position_name}</h3>
+                            <p className="text-sm text-gray-400">{position.chain || protocol.chain}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xl font-bold text-white">
+                              ${totalPositionValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </p>
+                            {/* APY Display for Position */}
+                            <APYDisplay 
+                              protocolName={protocol.name}
+                              positionName={position.position_name}
+                              walletAddress={protocol.sourceWallet || 'unknown'}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Position Tokens */}
+                        {position.tokens && position.tokens.length > 0 && (
+                          <div className="mb-4">
+                            <h4 className="text-sm font-medium text-gray-300 mb-2">Tokens ({positionTokensValue.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })})</h4>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-gray-400 border-b border-gray-700">
+                                    {tokensColumns.map(col => (
+                                      <th key={col.key} className={`text-${col.align} py-2 ${col.className}`}>
+                                        {col.label}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {position.tokens.map((token, tokenIdx: number) => (
+                                    <tr key={tokenIdx} className="border-b border-gray-800 hover:bg-gray-700/50">
+                                      <td className="py-2 text-left text-gray-300">{position.chain || protocol.chain}</td>
+                                      <td className="py-2 text-left text-white font-medium">{token.symbol}</td>
+                                      <td className="py-2 text-left text-gray-300">{token.symbol}</td>
+                                      <td className="py-2 text-right text-white">{token.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                                      <td className="py-2 text-right text-gray-300">$N/A</td>
+                                      <td className="py-2 text-right text-white font-medium">${token.usd_value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Position Rewards */}
+                        {position.rewards && position.rewards.length > 0 && (
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-300 mb-2">Rewards ({rewardTokensValue.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })})</h4>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="text-gray-400 border-b border-gray-700">
+                                    {positionsColumns.map(col => (
+                                      <th key={col.key} className={`text-${col.align} py-2 ${col.className}`}>
+                                        {col.label}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {position.rewards.map((reward, rewardIdx: number) => (
+                                    <tr key={rewardIdx} className="border-b border-gray-800 hover:bg-gray-700/50">
+                                      <td className="py-2 text-left text-white font-medium">{reward.symbol}</td>
+                                      <td className="py-2 text-left text-gray-300">{reward.symbol}</td>
+                                      <td className="py-2 text-right text-white">{reward.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                                      <td className="py-2 text-right text-gray-300">$N/A</td>
+                                      <td className="py-2 text-right text-white font-medium">${reward.usd_value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+
+        {allProtocols.length === 0 && (
+          <Card>
+            <div className="text-center py-12">
+              <BarChart3 className="w-16 h-16 mx-auto text-gray-500 mb-4" />
+              <h3 className="text-xl font-semibold text-gray-400 mb-2">No Positions Found</h3>
+              <p className="text-gray-500">
+                Connect wallets with DeFi positions to see them here.
+              </p>
+            </div>
+          </Card>
+        )}
       </div>
 
-      {/* Position APY Details */}
-      {positionAPYs?.success && positionAPYs.positionCount > 0 && (
-        <Card>
-          <h2 className="text-xl font-semibold text-white mb-6 flex items-center">
-            <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
-            Position APY Performance
-          </h2>
-          <div className="text-center py-8">
-            <p className="text-green-500 text-lg">
-              🎉 APY Data Available! 
-            </p>
-            <p className="text-gray-400 text-sm mt-2">
-              Found {positionAPYs.positionCount} positions with APY data
-            </p>
-            <div className="mt-4 text-left">
-              <p className="text-white font-semibold">Available Positions:</p>
-              {Object.entries(positionAPYs.positions || {}).map(([positionId, apyData]: [string, any]) => (
-                <div key={positionId} className="mt-2 p-3 bg-gray-800 rounded">
-                  <p className="text-sm text-gray-300">ID: {positionId}</p>
-                  <p className="text-lg text-green-400">
-                    Daily APY: {apyData?.daily?.apy || 'No data'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Card>
-      )}
 
-      {/* Position table */}
-      <Card>
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6 flex items-center">
-          <BarChart3 className="w-5 h-5 mr-2 text-blue-500" />
-          Position Details
-        </h2>
-        <div className="space-y-4 mb-6">
-          <p className="text-gray-600 dark:text-gray-400 text-sm">Click on protocols and sections to expand/collapse</p>
-        </div>
-        <AccordionDataTable
-          columns={positionsColumns}
-          data={protocolPositions}
-          className="mb-4"
-        />
-      </Card>
-
-      {/* Summary */}
-      <Card>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="text-center">
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Total Tokens NAV</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">${totalTokensValue.toLocaleString()}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Total Positions NAV</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">${finalTotalPositionsValue.toLocaleString()}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Active Protocols</p>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{filteredProtocols.length}</p>
-          </div>
-        </div>
-      </Card>
     </div>
   );
 };

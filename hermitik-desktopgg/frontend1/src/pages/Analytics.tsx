@@ -152,19 +152,7 @@ const Analytics: React.FC = () => {
       </div>
 
       {/* Portfolio Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">Total Portfolio Value</p>
-              <p className="text-2xl font-bold text-white">
-                ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-            <TrendingUp className="w-8 h-8 text-green-500" />
-          </div>
-        </Card>
-
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <div className="flex items-center justify-between">
             <div>

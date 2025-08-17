@@ -24,6 +24,7 @@ export interface Token {
 
 export interface Position {
   position_name: string;
+  chain?: string;
   tokens: Array<{
     symbol: string;
     amount: number;
