@@ -1772,12 +1772,21 @@ router.get('/positions/apy', auth, async (req, res) => {
     console.log(`📊 Calculating position APYs for user: ${userId}`);
     
     const targetDateTime = targetDate ? new Date(targetDate) : new Date();
-    const apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime);
+    
+    // Try snapshot-based APY calculation first (real data)
+    const APYFromSnapshotsService = require('../services/apyCalculationFromSnapshots');
+    let apyResults = await APYFromSnapshotsService.calculateAllPositionAPYs(userId, targetDateTime);
+    
+    // Fallback to PositionHistory-based calculation if no snapshot data
+    if (Object.keys(apyResults).length === 0) {
+      console.log('⚠️ No snapshot data found, falling back to PositionHistory');
+      apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime);
+    }
     
     // Format APY results for display
     const formattedResults = {};
     Object.entries(apyResults).forEach(([positionId, apyData]) => {
-      formattedResults[positionId] = APYCalculationService.formatAPYForDisplay(apyData);
+      formattedResults[positionId] = APYFromSnapshotsService.formatAPYForDisplay(apyData);
     });
     
     console.log(`✅ APY calculated for ${Object.keys(formattedResults).length} positions`);
@@ -1837,6 +1846,82 @@ router.get('/positions/:debankPositionId/apy', auth, async (req, res) => {
     });
   } catch (error) {
     console.error(`Error calculating APY for Debank position ${req.params.debankPositionId}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ====================================
+// TOKEN APY ROUTES
+// ====================================
+
+// Get APY calculations for all user tokens
+router.get('/tokens/apy', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { targetDate } = req.query;
+    
+    console.log(`🪙 Calculating token APYs for user: ${userId}`);
+    
+    const targetDateTime = targetDate ? new Date(targetDate) : new Date();
+    
+    // Use token APY calculation service
+    const TokenAPYCalculationService = require('../services/tokenAPYCalculationService');
+    const tokenAPYs = await TokenAPYCalculationService.calculateAllTokenAPYs(userId, targetDateTime);
+    
+    // Format token APY results for display
+    const formattedResults = TokenAPYCalculationService.formatTokenAPYForDisplay(tokenAPYs);
+    
+    console.log(`✅ Token APY calculated for ${Object.keys(formattedResults).length} tokens`);
+    
+    res.json({
+      userId,
+      targetDate: targetDateTime,
+      tokens: formattedResults,
+      tokenCount: Object.keys(formattedResults).length,
+      success: true
+    });
+  } catch (error) {
+    console.error('Error calculating token APYs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get APY calculation for specific token
+router.get('/tokens/:symbol/apy', auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { symbol } = req.params;
+    const { targetDate } = req.query;
+    
+    console.log(`🪙 Calculating APY for token: ${symbol} (user: ${userId})`);
+    
+    const targetDateTime = targetDate ? new Date(targetDate) : new Date();
+    
+    // Get all token APYs and filter for specific token
+    const TokenAPYCalculationService = require('../services/tokenAPYCalculationService');
+    const allTokenAPYs = await TokenAPYCalculationService.calculateAllTokenAPYs(userId, targetDateTime);
+    const tokenAPY = allTokenAPYs[symbol.toUpperCase()];
+    
+    if (!tokenAPY) {
+      return res.status(404).json({ 
+        error: `Token ${symbol} not found in user portfolio`,
+        availableTokens: Object.keys(allTokenAPYs)
+      });
+    }
+    
+    const formattedAPY = TokenAPYCalculationService.formatTokenAPYForDisplay({ [symbol]: tokenAPY });
+    
+    console.log(`✅ APY calculated for token: ${symbol}`);
+    
+    res.json({
+      userId,
+      symbol: symbol.toUpperCase(),
+      targetDate: targetDateTime,
+      tokenAPY: formattedAPY[symbol],
+      success: true
+    });
+  } catch (error) {
+    console.error(`Error calculating APY for token ${req.params.symbol}:`, error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -95,7 +95,7 @@ const PositionHistorySchema = new mongoose.Schema({
   ]
 });
 
-// Static methods for APY calculations with new 1-day assumption logic
+// Static methods for comprehensive APY calculations following mathematical best practices
 PositionHistorySchema.statics.calculatePositionAPY = async function(userId, debankPositionId, targetDate = new Date()) {
   const results = {
     daily: null,
@@ -121,96 +121,287 @@ PositionHistorySchema.statics.calculatePositionAPY = async function(userId, deba
     const currentValue = currentPosition.totalValue;
     const currentRewards = currentPosition.unclaimedRewardsValue || 0;
 
-    // Check if position existed yesterday
-    const yesterday = new Date(targetDate);
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
-
-    const yesterdayPosition = await this.findOne({
-      userId,
-      debankPositionId,
-      date: { $gte: yesterday, $lt: targetDate },
-      isActive: true
-    }).sort({ date: -1 });
-
-    // If no yesterday position, assume 1-day old position
-    if (!yesterdayPosition) {
-      // New position: APY = (unclaimed_rewards / position_value) * 365
-      if (currentValue > 0) {
-        const newPositionAPY = (currentRewards / currentValue) * 365 * 100;
-        
-        results.daily = {
-          apy: newPositionAPY,
-          periodReturn: (currentRewards / currentValue) * 100,
-          days: 1,
-          isNewPosition: true
-        };
-      }
-      return results;
+    // Step 1: Data Validation
+    if (!this._validatePositionData(currentValue, currentRewards)) {
+      return this._createErrorResult(currentValue, currentRewards, 'Invalid position data');
     }
 
-    // Calculate APY for different time periods (existing logic)
+    // Step 2: Check for historical data
+    const historicalPositions = await this._getHistoricalPositions(userId, debankPositionId, targetDate);
+    
+    // Step 3: Determine calculation method
+    if (historicalPositions.length === 0) {
+      // New position: Use simple APY based on rewards
+      return this._calculateNewPositionAPY(currentValue, currentRewards);
+    }
+
+    // Step 4: Calculate APY for different time periods
     const periods = [
-      { name: 'daily', days: 1, annualizationFactor: 365 },
-      { name: 'weekly', days: 7, annualizationFactor: 365/7 },
-      { name: 'monthly', days: 30, annualizationFactor: 365/30 },
-      { name: 'sixMonth', days: 180, annualizationFactor: 365/180 }
+      { name: 'daily', days: 1 },
+      { name: 'weekly', days: 7 },
+      { name: 'monthly', days: 30 },
+      { name: 'sixMonth', days: 180 }
     ];
 
     for (const period of periods) {
-      const historicalDate = new Date(targetDate);
-      historicalDate.setDate(historicalDate.getDate() - period.days);
-
-      // Find historical position within the period
-      const historicalPosition = await this.findOne({
-        userId,
-        debankPositionId,
-        date: { $gte: historicalDate, $lt: targetDate },
-        isActive: true
-      }).sort({ date: 1 });
-
-      if (historicalPosition) {
-        const historicalValue = historicalPosition.totalValue;
-        if (historicalValue > 0) {
-          const actualDays = Math.ceil((targetDate - historicalPosition.date) / (1000 * 60 * 60 * 24));
-          const periodReturn = (currentValue / historicalValue) - 1;
-          const annualizedReturn = Math.pow(1 + periodReturn, period.annualizationFactor) - 1;
-          
-          results[period.name] = {
-            apy: annualizedReturn * 100,
-            periodReturn: periodReturn * 100,
-            days: actualDays,
-            isNewPosition: false
-          };
-        }
+      const periodResult = await this._calculatePeriodAPY(
+        userId, 
+        debankPositionId, 
+        targetDate, 
+        period, 
+        currentValue, 
+        currentRewards
+      );
+      
+      if (periodResult) {
+        results[period.name] = periodResult;
       }
     }
 
-    // Calculate all-time APY from first available position
-    const firstPosition = await this.findOne({
-      userId,
-      debankPositionId,
-      isActive: true
-    }).sort({ date: 1 });
-
-    if (firstPosition && firstPosition.totalValue > 0) {
-      const daysHeld = Math.max(1, (targetDate - firstPosition.date) / (1000 * 60 * 60 * 24));
-      const totalReturn = (currentValue / firstPosition.totalValue) - 1;
-      const annualizedReturn = Math.pow(1 + totalReturn, 365 / daysHeld) - 1;
-      
-      results.allTime = {
-        apy: annualizedReturn * 100,
-        periodReturn: totalReturn * 100,
-        days: Math.ceil(daysHeld),
-        firstRecorded: firstPosition.date
-      };
-    }
+    // Step 5: Calculate all-time APY
+    results.allTime = await this._calculateAllTimeAPY(
+      userId, 
+      debankPositionId, 
+      targetDate, 
+      currentValue
+    );
 
     return results;
   } catch (error) {
     console.error('Error calculating position APY:', error);
     return results;
   }
+};
+
+// Data validation helper
+PositionHistorySchema.statics._validatePositionData = function(currentValue, currentRewards) {
+  // Prevent division by zero and negative values
+  if (currentValue <= 0) return false;
+  if (currentRewards < 0) return false;
+  if (!Number.isFinite(currentValue) || !Number.isFinite(currentRewards)) return false;
+  return true;
+};
+
+// Get historical positions for all periods
+PositionHistorySchema.statics._getHistoricalPositions = async function(userId, debankPositionId, targetDate) {
+  return await this.find({
+    userId,
+    debankPositionId,
+    date: { $lt: targetDate },
+    isActive: true
+  }).sort({ date: -1 });
+};
+
+// Calculate APY for new positions (simple method)
+PositionHistorySchema.statics._calculateNewPositionAPY = function(currentValue, currentRewards) {
+  /**
+   * Simple APY Formula: APY = (unclaimed_rewards / position_value) × 365 × 100
+   * This assumes the rewards were earned in 1 day
+   */
+  const dailyReturn = currentRewards / currentValue;
+  const simpleAPY = dailyReturn * 365 * 100;
+  
+  // Determine confidence and warnings
+  const { confidence, warnings } = this._assessAPYConfidence(simpleAPY, dailyReturn * 100, true);
+  
+  return {
+    daily: {
+      apy: Math.round(simpleAPY * 100) / 100, // Round to 2 decimal places
+      periodReturn: Math.round(dailyReturn * 10000) / 100, // Round to 2 decimal places
+      days: 1,
+      isNewPosition: true,
+      confidence,
+      warnings,
+      calculationMethod: 'simple_apy',
+      rawDailyReturn: dailyReturn,
+      positionValue: currentValue,
+      rewardsValue: currentRewards
+    },
+    weekly: null,
+    monthly: null,
+    sixMonth: null,
+    allTime: null
+  };
+};
+
+// Calculate APY for a specific period
+PositionHistorySchema.statics._calculatePeriodAPY = async function(userId, debankPositionId, targetDate, period, currentValue, currentRewards) {
+  // Calculate target historical date
+  const historicalDate = new Date(targetDate);
+  historicalDate.setDate(historicalDate.getDate() - period.days);
+
+  // Find closest historical position
+  const historicalPosition = await this.findOne({
+    userId,
+    debankPositionId,
+    date: { $gte: historicalDate, $lt: targetDate },
+    isActive: true
+  }).sort({ date: 1 });
+
+  if (!historicalPosition || historicalPosition.totalValue <= 0) {
+    return null;
+  }
+
+  const historicalValue = historicalPosition.totalValue;
+  const actualDays = Math.max(1, Math.ceil((targetDate - historicalPosition.date) / (1000 * 60 * 60 * 24)));
+
+  /**
+   * Period-based APY Formula:
+   * Period Return = (current_value / historical_value) - 1
+   * APY = ((1 + period_return) ^ annualization_factor) - 1
+   * Where annualization_factor = 365 / days_in_period
+   */
+  const periodReturn = (currentValue / historicalValue) - 1;
+  const annualizationFactor = 365 / actualDays;
+  
+  // Prevent extreme calculations
+  if (Math.abs(periodReturn) > 10) { // More than 1000% period return
+    return this._createExtremeValueResult(periodReturn, actualDays, currentValue, currentRewards);
+  }
+
+  const annualizedReturn = Math.pow(1 + periodReturn, annualizationFactor) - 1;
+  const apy = annualizedReturn * 100;
+
+  // Assess confidence
+  const { confidence, warnings } = this._assessAPYConfidence(apy, periodReturn * 100, false, actualDays);
+
+  return {
+    apy: Math.round(apy * 100) / 100,
+    periodReturn: Math.round(periodReturn * 10000) / 100,
+    days: actualDays,
+    isNewPosition: false,
+    confidence,
+    warnings,
+    calculationMethod: 'period_based_apy',
+    rawDailyReturn: periodReturn / actualDays,
+    positionValue: currentValue,
+    rewardsValue: currentRewards,
+    historicalValue: historicalValue,
+    periodStart: historicalPosition.date
+  };
+};
+
+// Calculate all-time APY
+PositionHistorySchema.statics._calculateAllTimeAPY = async function(userId, debankPositionId, targetDate, currentValue) {
+  const firstPosition = await this.findOne({
+    userId,
+    debankPositionId,
+    isActive: true
+  }).sort({ date: 1 });
+
+  if (!firstPosition || firstPosition.totalValue <= 0) {
+    return null;
+  }
+
+  const daysHeld = Math.max(1, (targetDate - firstPosition.date) / (1000 * 60 * 60 * 24));
+  const totalReturn = (currentValue / firstPosition.totalValue) - 1;
+  
+  // Prevent extreme calculations for very short periods
+  if (daysHeld < 1) {
+    return null;
+  }
+
+  const annualizedReturn = Math.pow(1 + totalReturn, 365 / daysHeld) - 1;
+  const apy = annualizedReturn * 100;
+
+  // Assess confidence
+  const { confidence, warnings } = this._assessAPYConfidence(apy, totalReturn * 100, false, Math.ceil(daysHeld));
+
+  return {
+    apy: Math.round(apy * 100) / 100,
+    periodReturn: Math.round(totalReturn * 10000) / 100,
+    days: Math.ceil(daysHeld),
+    isNewPosition: false,
+    confidence,
+    warnings,
+    calculationMethod: 'all_time_apy',
+    positionValue: currentValue,
+    firstRecorded: firstPosition.date,
+    initialValue: firstPosition.totalValue
+  };
+};
+
+// Assess APY confidence and generate warnings
+PositionHistorySchema.statics._assessAPYConfidence = function(apy, periodReturn, isNewPosition, days = 1) {
+  let confidence = 'high';
+  let warnings = [];
+
+  // Outlier detection - flag extreme APY values
+  const MAX_REASONABLE_APY = 10000; // 10,000%
+  const MIN_REASONABLE_APY = -99; // -99%
+
+  if (apy > MAX_REASONABLE_APY) {
+    confidence = 'low';
+    warnings.push(`Extreme APY of ${apy.toFixed(2)}% detected - please verify data accuracy`);
+  } else if (apy < MIN_REASONABLE_APY) {
+    confidence = 'low';
+    warnings.push(`Extreme negative APY of ${apy.toFixed(2)}% detected - position may be losing significant value`);
+  }
+
+  // Period-specific warnings
+  if (isNewPosition) {
+    if (Math.abs(periodReturn) > 5) {
+      confidence = 'low';
+      warnings.push(`Daily return of ${periodReturn.toFixed(2)}% seems unrealistically high for new position`);
+    } else if (Math.abs(periodReturn) > 1) {
+      confidence = 'medium';
+      warnings.push(`Daily return of ${periodReturn.toFixed(2)}% is quite high - verify reward calculation`);
+    }
+  } else {
+    // Historical data available
+    if (days < 7 && Math.abs(apy) > 1000) {
+      confidence = 'low';
+      warnings.push(`Short period (${days} days) with high APY may not be representative`);
+    } else if (days >= 30 && confidence === 'high') {
+      confidence = 'high'; // More confidence in longer periods
+    }
+  }
+
+  // Additional validation
+  if (periodReturn < -50) {
+    confidence = 'low';
+    warnings.push(`Large period loss of ${periodReturn.toFixed(2)}% - position may be compromised`);
+  }
+
+  return { confidence, warnings };
+};
+
+// Create result for extreme values
+PositionHistorySchema.statics._createExtremeValueResult = function(periodReturn, actualDays, currentValue, currentRewards) {
+  return {
+    apy: null,
+    periodReturn: Math.round(periodReturn * 10000) / 100,
+    days: actualDays,
+    isNewPosition: false,
+    confidence: 'low',
+    warnings: [`Extreme period return of ${(periodReturn * 100).toFixed(2)}% - APY calculation skipped`],
+    calculationMethod: 'extreme_value_detected',
+    rawDailyReturn: periodReturn / actualDays,
+    positionValue: currentValue,
+    rewardsValue: currentRewards
+  };
+};
+
+// Create error result for invalid data
+PositionHistorySchema.statics._createErrorResult = function(currentValue, currentRewards, errorMessage) {
+  return {
+    daily: {
+      apy: null,
+      periodReturn: null,
+      days: 0,
+      isNewPosition: true,
+      confidence: 'low',
+      warnings: [errorMessage],
+      calculationMethod: 'error',
+      rawDailyReturn: null,
+      positionValue: currentValue,
+      rewardsValue: currentRewards
+    },
+    weekly: null,
+    monthly: null,
+    sixMonth: null,
+    allTime: null
+  };
 };
 
 // Method to create position record with Debank position ID

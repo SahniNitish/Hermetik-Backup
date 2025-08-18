@@ -41,18 +41,22 @@ const runDailySnapshot = async () => {
 
           positions: protocols.flatMap(p =>
             (p.portfolio_item_list || []).map(item => ({
-              protocolId: p.protocol_id,
+              protocolId: p.id || p.protocol_id,
               protocolName: p.name,
               chain: p.chain,
-              positionName: p.name,
-              assetUsdValue: p.stats?.asset_usd_value,
-              debtUsdValue: p.stats?.debt_usd_value,
-              totalUsdValue: p.stats?.net_usd_value,
+              positionName: item.name || `${p.name}_${item.position_index || 'position'}`,
+              assetUsdValue: item.stats?.asset_usd_value || 0,
+              debtUsdValue: item.stats?.debt_usd_value || 0,
+              totalUsdValue: item.stats?.net_usd_value || 0,
               supplyTokens: item.detail?.supply_token_list || [],
               rewardTokens: item.detail?.reward_token_list || [],
-              // borrowTokens: item.detail?.borrow_token_list || [],
+              borrowTokens: item.detail?.borrow_token_list || [],
               dailyApy: p.lending_rate,
-              lendingRate: p.lending_rate
+              lendingRate: p.lending_rate,
+              itemType: item.name,
+              positionIndex: item.position_index,
+              description: item.detail?.description,
+              poolId: item.pool?.id
             }))
           )
         });

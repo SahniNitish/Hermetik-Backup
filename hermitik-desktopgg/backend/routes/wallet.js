@@ -115,17 +115,29 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
   console.log(`🚀 Processing ${wallets.length} wallets...`);
 
   try {
+    // First, try to get stored wallet data as fallback
+    const storedWallets = await WalletData.find({ 
+      userId: targetUserId,
+      address: { $in: wallets }
+    });
+    
+    console.log(`📦 Found ${storedWallets.length} stored wallets for fallback`);
+
     const results = await Promise.all(wallets.map(async (wallet) => {
       console.log(`\n🔄 Processing wallet: ${wallet}`);
       
-      // Fetch tokens and protocols in parallel
-      const [tokens, rawProtocols] = await Promise.all([
-        fetchTokens(wallet),
-        fetchAllProtocols(wallet)
-      ]);
+      // Check if we have stored data for this wallet
+      const storedWallet = storedWallets.find(sw => sw.address === wallet);
       
-      // Deduplicate protocols by name to avoid processing same protocol multiple times
-      const protocolsMap = new Map();
+      try {
+        // Fetch tokens and protocols in parallel
+        const [tokens, rawProtocols] = await Promise.all([
+          fetchTokens(wallet),
+          fetchAllProtocols(wallet)
+        ]);
+      
+        // Deduplicate protocols by name to avoid processing same protocol multiple times
+        const protocolsMap = new Map();
       rawProtocols.forEach(protocol => {
         const key = protocol.name;
         if (!protocolsMap.has(key)) {
@@ -337,6 +349,54 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
         }),
         summary
       };
+      } catch (apiError) {
+        console.log(`⚠️ Live API failed for wallet ${wallet}, using stored data fallback:`, apiError.message);
+        
+        // Fallback to stored data if available
+        if (storedWallet) {
+          console.log(`📦 Using stored data for wallet ${wallet}`);
+          
+          const summary = {
+            total_usd_value: storedWallet.protocols.reduce((sum, p) => sum + (p.net_usd_value || 0), 0),
+            token_usd_value: 0,
+            protocol_usd_value: storedWallet.protocols.reduce((sum, p) => sum + (p.net_usd_value || 0), 0),
+            token_count: 0,
+            protocol_count: storedWallet.protocols.length
+          };
+
+          return {
+            address: storedWallet.address,
+            balance: storedWallet.balance || 0,
+            tokens: [], // Empty tokens array for stored data
+            protocols: storedWallet.protocols.map(protocol => ({
+              protocol_id: protocol.protocol_id,
+              name: protocol.name,
+              chain_id: protocol.chain || 'ethereum',
+              chain: protocol.chain || 'ethereum',
+              logo_url: null,
+              net_usd_value: protocol.net_usd_value,
+              positions: protocol.positions || []
+            })),
+            summary
+          };
+        } else {
+          console.log(`❌ No stored data available for wallet ${wallet}, returning empty result`);
+          
+          return {
+            address: wallet,
+            balance: 0,
+            tokens: [],
+            protocols: [],
+            summary: {
+              total_usd_value: 0,
+              token_usd_value: 0,
+              protocol_usd_value: 0,
+              token_count: 0,
+              protocol_count: 0
+            }
+          };
+        }
+      }
     }));
 
     // Calculate overall portfolio summary
