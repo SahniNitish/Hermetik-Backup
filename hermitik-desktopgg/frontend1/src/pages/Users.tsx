@@ -168,12 +168,12 @@ const Users: React.FC = () => {
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">User Management</h1>
-            <p className="text-gray-600 dark:text-gray-400">View and manage user accounts</p>
+            <h1 className="text-2xl font-bold text-white mb-2 font-heading">User Management</h1>
+            <p className="text-gray-400">View and manage user accounts</p>
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center space-x-2"
+            className="btn-primary flex items-center space-x-2"
           >
             <Plus size={16} />
             <span>Create User</span>
@@ -190,15 +190,15 @@ const Users: React.FC = () => {
             placeholder="Search users by name or email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
           />
         </div>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span className="ml-2 text-gray-600 dark:text-gray-400">Loading users...</span>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-hermetik-gold"></div>
+          <span className="ml-2 text-gray-400">Loading users...</span>
         </div>
       ) : error ? (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
@@ -214,42 +214,42 @@ const Users: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Users List */}
           <div className="lg:col-span-2">
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <div className="card-hermetik">
+              <div className="p-4 border-b border-hermetik-green/30">
+                <h2 className="text-lg font-semibold text-white font-heading">
                   All Users ({filteredUsers.length})
                 </h2>
               </div>
-              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+              <div className="divide-y divide-hermetik-green/20">
                 {filteredUsers.map((user) => (
                   <div
                     key={user.id}
-                    className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors ${
-                      selectedUser?.id === user.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    className={`p-4 hover:bg-hermetik-green/10 cursor-pointer transition-colors ${
+                      selectedUser?.id === user.id ? 'bg-hermetik-green/20' : ''
                     }`}
                     onClick={() => handleUserSelect(user)}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
+                        <div className="w-10 h-10 bg-hermetik-secondary rounded-full flex items-center justify-center">
                           {user.role === 'admin' ? (
-                            <Crown className="text-yellow-600" size={20} />
+                            <Crown className="text-hermetik-gold" size={20} />
                           ) : (
-                            <User className="text-gray-500 dark:text-gray-400" size={20} />
+                            <User className="text-gray-400" size={20} />
                           )}
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center space-x-2">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                            <h3 className="text-sm font-medium text-white">
                               {user.name}
                             </h3>
                             {user.role === 'admin' && (
-                              <span className="px-2 py-1 text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full">
+                              <span className="px-2 py-1 text-xs bg-hermetik-gold/30 text-hermetik-gold rounded-full border border-hermetik-gold/50">
                                 Admin
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-gray-500 dark:text-gray-400">{user.email}</p>
+                          <p className="text-sm text-gray-400">{user.email}</p>
                           {user.wallets && user.wallets.length > 0 && (
                             <div className="flex items-center space-x-1 mt-1">
                               <Wallet size={12} className="text-gray-400" />
@@ -274,7 +274,7 @@ const Users: React.FC = () => {
                           // Navigate to user's dashboard to show their profile
                           navigate('/');
                         }}
-                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center space-x-1"
+                        className="px-3 py-1 text-xs btn-primary rounded-lg transition-colors flex items-center space-x-1"
                         title="Open user profile"
                       >
                         <ExternalLink size={12} />
@@ -298,34 +298,34 @@ const Users: React.FC = () => {
 
           {/* User Details Panel */}
           <div className="lg:col-span-1">
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 sticky top-6">
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">User Details</h2>
+            <div className="card-hermetik sticky top-6">
+              <div className="p-4 border-b border-hermetik-green/30">
+                <h2 className="text-lg font-semibold text-white font-heading">User Details</h2>
               </div>
               {selectedUser ? (
                 <div className="p-4 space-y-4">
                   <div className="text-center">
-                    <div className="w-16 h-16 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <div className="w-16 h-16 bg-hermetik-secondary rounded-full flex items-center justify-center mx-auto mb-3">
                       {selectedUser.role === 'admin' ? (
-                        <Crown className="text-yellow-600" size={24} />
+                        <Crown className="text-hermetik-gold" size={24} />
                       ) : (
-                        <User className="text-gray-500 dark:text-gray-400" size={24} />
+                        <User className="text-gray-400" size={24} />
                       )}
                     </div>
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-medium text-white">
                       {selectedUser.name}
                     </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{selectedUser.email}</p>
+                    <p className="text-sm text-gray-400">{selectedUser.email}</p>
                   </div>
 
                   <div className="space-y-3">
                     <div>
-                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Role</label>
+                      <label className="text-sm font-medium text-gray-400">Role</label>
                       <div className="mt-1">
                         <span className={`px-2 py-1 text-xs rounded-full ${
                           selectedUser.role === 'admin' 
-                            ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                            ? 'bg-hermetik-gold/30 text-hermetik-gold border border-hermetik-gold/50'
+                            : 'bg-hermetik-secondary text-gray-300 border border-hermetik-green/30'
                         }`}>
                           {selectedUser.role.charAt(0).toUpperCase() + selectedUser.role.slice(1)}
                         </span>
@@ -333,8 +333,8 @@ const Users: React.FC = () => {
                     </div>
 
                     <div>
-                      <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Created At</label>
-                      <p className="text-sm text-gray-900 dark:text-white">
+                      <label className="text-sm font-medium text-gray-400">Created At</label>
+                      <p className="text-sm text-white">
                         {new Date(selectedUser.createdAt).toLocaleDateString()}
                       </p>
                     </div>
@@ -342,13 +342,13 @@ const Users: React.FC = () => {
 
                     {selectedUser.wallets && selectedUser.wallets.length > 0 && (
                       <div>
-                        <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                        <label className="text-sm font-medium text-gray-400">
                           Wallet Addresses ({selectedUser.wallets.length})
                         </label>
                         <div className="mt-1 space-y-1">
                           {selectedUser.wallets.slice(0, 3).map((wallet, index) => (
-                            <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded text-xs">
-                              <span className="font-mono text-gray-900 dark:text-white">
+                            <div key={index} className="flex items-center justify-between p-2 bg-hermetik-secondary rounded text-xs">
+                              <span className="font-mono text-white">
                                 {wallet.slice(0, 8)}...{wallet.slice(-8)}
                               </span>
                             </div>
@@ -369,7 +369,7 @@ const Users: React.FC = () => {
                         switchToUser(selectedUser);
                         navigate('/');
                       }}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
+                      className="w-full btn-primary flex items-center justify-center space-x-2"
                     >
                       <ExternalLink size={16} />
                       <span>Open Profile</span>
@@ -380,7 +380,7 @@ const Users: React.FC = () => {
                       <button
                         onClick={() => handleExportUserExcel(selectedUser)}
                         disabled={exportingUser === selectedUser.id}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-1 text-sm disabled:opacity-50"
+                        className="px-3 py-2 bg-hermetik-green text-white rounded-lg hover:bg-hermetik-green/80 transition-colors flex items-center justify-center space-x-1 text-sm disabled:opacity-50"
                       >
                         <Download size={14} />
                         <span>{exportingUser === selectedUser.id ? 'Exporting...' : 'Excel'}</span>
@@ -389,7 +389,7 @@ const Users: React.FC = () => {
                       <button
                         onClick={() => handleExportUserMonthlyNav(selectedUser)}
                         disabled={exportingUser === selectedUser.id}
-                        className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center space-x-1 text-sm disabled:opacity-50"
+                        className="px-3 py-2 bg-hermetik-gold text-hermetik-dark rounded-lg hover:bg-hermetik-gold/80 transition-colors flex items-center justify-center space-x-1 text-sm disabled:opacity-50"
                       >
                         <Download size={14} />
                         <span>{exportingUser === selectedUser.id ? 'Exporting...' : 'NAV'}</span>
@@ -414,7 +414,7 @@ const Users: React.FC = () => {
                           switchBackToAdmin();
                           alert('Switched back to admin view');
                         }}
-                        className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center space-x-2"
+                        className="w-full btn-secondary flex items-center justify-center space-x-2"
                       >
                         <ArrowLeft size={16} />
                         <span>Back to Admin View</span>
@@ -446,23 +446,23 @@ const Users: React.FC = () => {
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+          <div className="card-hermetik p-6 w-full max-w-md mx-4">
             <div className="flex items-center space-x-3 mb-4">
-              <div className="w-12 h-12 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
+              <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center">
                 <Trash2 className="w-6 h-6 text-red-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Delete User</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">This action cannot be undone</p>
+                <h3 className="text-lg font-semibold text-white font-heading">Delete User</h3>
+                <p className="text-sm text-gray-400">This action cannot be undone</p>
               </div>
             </div>
             
             <div className="mb-6">
-              <p className="text-gray-700 dark:text-gray-300">
+              <p className="text-gray-300">
                 Are you sure you want to delete <strong>{showDeleteConfirm.name}</strong>? 
                 This will permanently delete their account and all associated data including:
               </p>
-              <ul className="mt-2 text-sm text-gray-600 dark:text-gray-400 list-disc list-inside">
+              <ul className="mt-2 text-sm text-gray-400 list-disc list-inside">
                 <li>Portfolio snapshots</li>
                 <li>Wallet data</li>
                 <li>Account information</li>
@@ -472,7 +472,7 @@ const Users: React.FC = () => {
             <div className="flex space-x-3">
               <button
                 onClick={() => setShowDeleteConfirm(null)}
-                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="flex-1 btn-secondary"
               >
                 Cancel
               </button>

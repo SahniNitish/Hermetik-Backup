@@ -123,7 +123,9 @@ export const mockAuthApi = {
 
     // If this is a new wallet address, create mock data for it
     if (!mockWallets.find(w => w.address === address)) {
-      const newWallet: Wallet = {
+      
+      // Calculate values
+      ({
         address,
         tokens: [
           {
@@ -142,14 +144,144 @@ export const mockAuthApi = {
           token_usd_value: 0,
           protocol_usd_value: 0
         }
-      };
+      }).tokens[0].usd_value = ({
+        address,
+        tokens: [
+          {
+            symbol: 'ETH',
+            name: 'Ethereum',
+            amount: Math.random() * 5,
+            price: 2340.50,
+            usd_value: 0,
+            chain: 'ethereum',
+            logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+          }
+        ],
+        protocols: [],
+        summary: {
+          total_usd_value: 0,
+          token_usd_value: 0,
+          protocol_usd_value: 0
+        }
+      }).tokens[0].amount * ({
+        address,
+        tokens: [
+          {
+            symbol: 'ETH',
+            name: 'Ethereum',
+            amount: Math.random() * 5,
+            price: 2340.50,
+            usd_value: 0,
+            chain: 'ethereum',
+            logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+          }
+        ],
+        protocols: [],
+        summary: {
+          total_usd_value: 0,
+          token_usd_value: 0,
+          protocol_usd_value: 0
+        }
+      }).tokens[0].price;
+      ({
+        address,
+        tokens: [
+          {
+            symbol: 'ETH',
+            name: 'Ethereum',
+            amount: Math.random() * 5,
+            price: 2340.50,
+            usd_value: 0,
+            chain: 'ethereum',
+            logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+          }
+        ],
+        protocols: [],
+        summary: {
+          total_usd_value: 0,
+          token_usd_value: 0,
+          protocol_usd_value: 0
+        }
+      }).summary.token_usd_value = ({
+        address,
+        tokens: [
+          {
+            symbol: 'ETH',
+            name: 'Ethereum',
+            amount: Math.random() * 5,
+            price: 2340.50,
+            usd_value: 0,
+            chain: 'ethereum',
+            logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+          }
+        ],
+        protocols: [],
+        summary: {
+          total_usd_value: 0,
+          token_usd_value: 0,
+          protocol_usd_value: 0
+        }
+      }).tokens[0].usd_value;
+      ({
+        address,
+        tokens: [
+          {
+            symbol: 'ETH',
+            name: 'Ethereum',
+            amount: Math.random() * 5,
+            price: 2340.50,
+            usd_value: 0,
+            chain: 'ethereum',
+            logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+          }
+        ],
+        protocols: [],
+        summary: {
+          total_usd_value: 0,
+          token_usd_value: 0,
+          protocol_usd_value: 0
+        }
+      }).summary.total_usd_value = ({
+        address,
+        tokens: [
+          {
+            symbol: 'ETH',
+            name: 'Ethereum',
+            amount: Math.random() * 5,
+            price: 2340.50,
+            usd_value: 0,
+            chain: 'ethereum',
+            logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+          }
+        ],
+        protocols: [],
+        summary: {
+          total_usd_value: 0,
+          token_usd_value: 0,
+          protocol_usd_value: 0
+        }
+      }).summary.token_usd_value;
       
-      // Calculate values
-      newWallet.tokens[0].usd_value = newWallet.tokens[0].amount * newWallet.tokens[0].price;
-      newWallet.summary.token_usd_value = newWallet.tokens[0].usd_value;
-      newWallet.summary.total_usd_value = newWallet.summary.token_usd_value;
-      
-      mockWallets.push(newWallet);
+      mockWallets.push({
+          address,
+          tokens: [
+            {
+              symbol: 'ETH',
+              name: 'Ethereum',
+              amount: Math.random() * 5,
+              price: 2340.50,
+              usd_value: 0,
+              chain: 'ethereum',
+              logo_url: 'https://cryptologos.cc/logos/ethereum-eth-logo.png'
+            }
+          ],
+          protocols: [],
+          summary: {
+            total_usd_value: 0,
+            token_usd_value: 0,
+            protocol_usd_value: 0
+          }
+        });
     }
 
     return { message: 'Wallet added successfully' };

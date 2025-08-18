@@ -654,9 +654,9 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <Calculator className="w-8 h-8 text-blue-500" />
+          <Calculator className="w-8 h-8 text-hermetik-gold" />
           <div>
-            <h1 className="text-2xl font-bold text-white">NAV Report Calculator</h1>
+            <h1 className="text-2xl font-bold text-white font-heading">NAV Report Calculator</h1>
             <p className="text-gray-400 text-sm">
               Generating NAV report for: <span className="text-white font-medium">{viewedUser?.name || 'Unknown User'}</span>
             </p>
@@ -704,7 +704,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
             onClick={handleSave}
             disabled={isSaving}
             variant="secondary"
-            className="bg-blue-600 hover:bg-blue-700"
+            className="bg-hermetik-gold text-hermetik-dark hover:bg-hermetik-gold/80"
           >
             <Save className="w-4 h-4 mr-2" />
             {isSaving ? 'Saving...' : 'Save Settings'}
@@ -715,7 +715,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
             <Button
               onClick={() => setShowExportDropdown(!showExportDropdown)}
               variant="primary"
-              className="bg-green-600 hover:bg-green-700"
+              className="bg-hermetik-green text-white hover:bg-hermetik-green/80"
             >
               <Download className="w-4 h-4 mr-2" />
               Export NAV Report
@@ -736,7 +736,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                       disabled={isExporting}
                       variant="primary"
                       size="sm"
-                      className="w-full bg-green-600 hover:bg-green-700"
+                      className="w-full bg-hermetik-green hover:bg-hermetik-green/80"
                     >
                       {isExporting ? 'Exporting...' : 'Export Current'}
                     </Button>
@@ -931,7 +931,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                       <Button
                         onClick={handleLoadPriorNav}
                         size="sm"
-                        className="bg-green-600 hover:bg-green-700"
+                        className="bg-hermetik-green hover:bg-hermetik-green/80"
                         disabled={params.priorPreFeeNav === (priorNavData?.priorPreFeeNav || 0)}
                       >
                         {params.priorPreFeeNav === (priorNavData?.priorPreFeeNav || 0) ? '✓ Loaded' : 'Load Prior NAV'}
@@ -970,7 +970,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                       <Button
                         onClick={handleUseCurrentPortfolio}
                         size="sm"
-                        className="bg-blue-600 hover:bg-blue-700"
+                        className="bg-hermetik-gold text-hermetik-dark hover:bg-hermetik-gold/80"
                       >
                         Use Current Portfolio Value
                       </Button>

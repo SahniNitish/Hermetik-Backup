@@ -8,7 +8,7 @@ async function createRealSnapshotsFromLive() {
     await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/hermetik');
     console.log('✅ Connected to MongoDB');
 
-    const userId = '68a1f123f09a6ebb3a9d9c0b';
+    const userId = '687664412338e69e008eb5e2';
     console.log('🔍 Creating real DailySnapshot data for user:', userId);
 
     // Check if user has wallet addresses

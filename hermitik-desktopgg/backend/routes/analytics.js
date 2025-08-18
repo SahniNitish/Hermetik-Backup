@@ -1769,162 +1769,50 @@ router.get('/positions/apy', auth, async (req, res) => {
     const userId = req.user.id;
     const { targetDate } = req.query;
     
-    console.log(`📊 Calculating position APYs for user: ${userId}`);
+    console.log(`🔥 APY API REQUEST - User ID: ${userId}`);
+    console.log(`🔥 APY API REQUEST - User object:`, req.user);
     
     const targetDateTime = targetDate ? new Date(targetDate) : new Date();
     
-    // Try snapshot-based APY calculation first (real data)
-    const APYFromSnapshotsService = require('../services/apyCalculationFromSnapshots');
-    let apyResults = await APYFromSnapshotsService.calculateAllPositionAPYs(userId, targetDateTime);
+    // Check if user has snapshots first
+    const todaySnapshots = await DailySnapshot.find({ userId }).sort({ date: -1 }).limit(1);
+    console.log(`🔥 APY API REQUEST - User has ${todaySnapshots.length} snapshots`);
     
-    // Fallback to PositionHistory-based calculation if no snapshot data
-    if (Object.keys(apyResults).length === 0) {
-      console.log('⚠️ No snapshot data found, falling back to PositionHistory');
-      apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime);
+    if (todaySnapshots.length > 0) {
+      console.log(`🔥 APY API REQUEST - Latest snapshot date: ${todaySnapshots[0].date}`);
+      console.log(`🔥 APY API REQUEST - Latest snapshot positions: ${todaySnapshots[0].positions?.length || 0}`);
     }
+    
+    // Use the new clean APY calculation service
+    const apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime);
     
     // Format APY results for display
     const formattedResults = {};
     Object.entries(apyResults).forEach(([positionId, apyData]) => {
-      formattedResults[positionId] = APYFromSnapshotsService.formatAPYForDisplay(apyData);
+      formattedResults[positionId] = APYCalculationService.formatAPYForDisplay(apyData);
     });
     
-    console.log(`✅ APY calculated for ${Object.keys(formattedResults).length} positions`);
+    console.log(`🔥 APY API RESPONSE - Calculated for ${Object.keys(formattedResults).length} positions`);
+    console.log(`🔥 APY API RESPONSE - Position IDs: ${Object.keys(formattedResults)}`);
     
-    res.json({
+    const response = {
       userId,
       targetDate: targetDateTime,
       positions: formattedResults,
       positionCount: Object.keys(formattedResults).length,
       success: true
-    });
+    };
+    
+    console.log(`🔥 APY API RESPONSE - Sending:`, JSON.stringify(response, null, 2));
+    
+    res.json(response);
   } catch (error) {
-    console.error('Error calculating position APYs:', error);
+    console.error('🔥 APY API ERROR:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get APY calculation for specific position using Debank position ID
-router.get('/positions/:debankPositionId/apy', auth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { debankPositionId } = req.params;
-    const { targetDate } = req.query;
-    
-    console.log(`📊 Calculating APY for Debank position: ${debankPositionId} (user: ${userId})`);
-    
-    const targetDateTime = targetDate ? new Date(targetDate) : new Date();
-    const apyData = await APYCalculationService.calculatePositionAPY(userId, debankPositionId, targetDateTime);
-    
-    // Get position details
-    const positionDetails = await PositionHistory.findOne({
-      userId,
-      debankPositionId,
-      date: { $lte: targetDateTime },
-      isActive: true
-    }).sort({ date: -1 });
-    
-    const formattedAPY = APYCalculationService.formatAPYForDisplay(apyData);
-    
-    console.log(`✅ APY calculated for Debank position: ${debankPositionId}`);
-    
-    res.json({
-      userId,
-      debankPositionId,
-      targetDate: targetDateTime,
-      positionDetails: positionDetails ? {
-        protocolName: positionDetails.protocolName,
-        positionName: positionDetails.positionName,
-        walletAddress: positionDetails.walletAddress,
-        currentValue: `$${positionDetails.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        unclaimedRewards: `$${positionDetails.unclaimedRewardsValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        lastUpdated: positionDetails.date,
-        debankPositionId: positionDetails.debankPositionId
-      } : null,
-      apy: formattedAPY,
-      success: true
-    });
-  } catch (error) {
-    console.error(`Error calculating APY for Debank position ${req.params.debankPositionId}:`, error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ====================================
-// TOKEN APY ROUTES
-// ====================================
-
-// Get APY calculations for all user tokens
-router.get('/tokens/apy', auth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { targetDate } = req.query;
-    
-    console.log(`🪙 Calculating token APYs for user: ${userId}`);
-    
-    const targetDateTime = targetDate ? new Date(targetDate) : new Date();
-    
-    // Use token APY calculation service
-    const TokenAPYCalculationService = require('../services/tokenAPYCalculationService');
-    const tokenAPYs = await TokenAPYCalculationService.calculateAllTokenAPYs(userId, targetDateTime);
-    
-    // Format token APY results for display
-    const formattedResults = TokenAPYCalculationService.formatTokenAPYForDisplay(tokenAPYs);
-    
-    console.log(`✅ Token APY calculated for ${Object.keys(formattedResults).length} tokens`);
-    
-    res.json({
-      userId,
-      targetDate: targetDateTime,
-      tokens: formattedResults,
-      tokenCount: Object.keys(formattedResults).length,
-      success: true
-    });
-  } catch (error) {
-    console.error('Error calculating token APYs:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get APY calculation for specific token
-router.get('/tokens/:symbol/apy', auth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { symbol } = req.params;
-    const { targetDate } = req.query;
-    
-    console.log(`🪙 Calculating APY for token: ${symbol} (user: ${userId})`);
-    
-    const targetDateTime = targetDate ? new Date(targetDate) : new Date();
-    
-    // Get all token APYs and filter for specific token
-    const TokenAPYCalculationService = require('../services/tokenAPYCalculationService');
-    const allTokenAPYs = await TokenAPYCalculationService.calculateAllTokenAPYs(userId, targetDateTime);
-    const tokenAPY = allTokenAPYs[symbol.toUpperCase()];
-    
-    if (!tokenAPY) {
-      return res.status(404).json({ 
-        error: `Token ${symbol} not found in user portfolio`,
-        availableTokens: Object.keys(allTokenAPYs)
-      });
-    }
-    
-    const formattedAPY = TokenAPYCalculationService.formatTokenAPYForDisplay({ [symbol]: tokenAPY });
-    
-    console.log(`✅ APY calculated for token: ${symbol}`);
-    
-    res.json({
-      userId,
-      symbol: symbol.toUpperCase(),
-      targetDate: targetDateTime,
-      tokenAPY: formattedAPY[symbol],
-      success: true
-    });
-  } catch (error) {
-    console.error(`Error calculating APY for token ${req.params.symbol}:`, error);
-    res.status(500).json({ error: error.message });
-  }
-});
+// Note: Individual position APY lookup removed - use /positions/apy to get all position APYs
 
 // Get position performance summary with APY data (for dashboard overview)
 router.get('/positions/performance-summary', auth, async (req, res) => {

@@ -116,7 +116,7 @@ const Tokens: React.FC = () => {
       <AdminViewBanner />
       
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Token Holdings</h1>
+        <h1 className="text-3xl font-bold text-white mb-2 font-heading">Token Holdings</h1>
         <p className="text-gray-400">Manage and track your token portfolio across all chains</p>
       </div>
 
@@ -130,7 +130,7 @@ const Tokens: React.FC = () => {
               placeholder="Search tokens..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-10 pr-4 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
             />
           </div>
           <div className="flex items-center space-x-2">
@@ -138,7 +138,7 @@ const Tokens: React.FC = () => {
             <select
               value={selectedChain}
               onChange={(e) => setSelectedChain(e.target.value)}
-              className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="px-3 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
             >
               <option value="all">All Chains</option>
               {chains.map(chain => (

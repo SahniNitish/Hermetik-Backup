@@ -1,1182 +1,329 @@
-const PositionHistory = require('../models/PositionHistory');
 const DailySnapshot = require('../models/DailySnapshot');
 
-// Redis client for caching (fallback to memory cache if Redis not available)
-let redisClient = null;
-let memoryCache = new Map();
-
-try {
-  // Try to initialize Redis client
-  const redis = require('redis');
-  redisClient = redis.createClient({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
-    db: process.env.REDIS_DB || 0
-  });
-
-  redisClient.on('error', (err) => {
-    console.warn('Redis connection error, falling back to memory cache:', err.message);
-    redisClient = null;
-  });
-
-  redisClient.on('connect', () => {
-    console.log('Redis connected for APY caching');
-  });
-} catch (error) {
-  console.warn('Redis not available, using memory cache for APY calculations:', error.message);
-  redisClient = null;
-}
-
+/**
+ * Clean APY Calculation Service
+ * 
+ * Requirements:
+ * - Use existing snapshot data structure/schema
+ * - Compare today's snapshot with yesterday's snapshot
+ * - For positions that exist in both: calculate APY based on actual time difference
+ * - For NEW positions (didn't exist yesterday): assume exactly 1 day old
+ * - APY formula for 1-day-old positions: APY = (unclaimed_rewards / position_value) * 365
+ */
 class APYCalculationService {
-  
-  // Cache configuration
-  static CACHE_CONFIG = {
-    // Cache TTL (Time To Live) in seconds
-    APY_CALCULATION_TTL: 3600,        // 1 hour for APY calculations
-    PORTFOLIO_PERFORMANCE_TTL: 1800,   // 30 minutes for portfolio performance
-    POSITION_SUMMARY_TTL: 900,        // 15 minutes for position summaries
-    HISTORICAL_DATA_TTL: 7200,        // 2 hours for historical data
-    
-    // Cache key prefixes
-    PREFIX_APY: 'apy:position:',
-    PREFIX_PORTFOLIO: 'apy:portfolio:',
-    PREFIX_SUMMARY: 'apy:summary:',
-    PREFIX_HISTORICAL: 'apy:historical:',
-    
-    // Memory cache limits (when Redis unavailable)
-    MAX_MEMORY_CACHE_SIZE: 1000,
-    MEMORY_CACHE_CLEANUP_INTERVAL: 300000 // 5 minutes
-  };
 
   /**
-   * Get data from cache (Redis or memory fallback)
+   * Calculate APY for all positions for a user
+   * @param {string} userId - User ID
+   * @param {Date} targetDate - Date to calculate APY for (defaults to today)
+   * @returns {Object} - Object with position APYs
    */
-  static async getFromCache(key) {
+  static async calculateAllPositionAPYs(userId, targetDate = new Date()) {
+    console.log(`📊 Calculating APYs for user: ${userId} on ${targetDate.toISOString().split('T')[0]}`);
+    
     try {
-      if (redisClient && redisClient.connected) {
-        const cached = await redisClient.get(key);
-        return cached ? JSON.parse(cached) : null;
-      } else {
-        // Fallback to memory cache
-        const cached = memoryCache.get(key);
-        if (cached && cached.expiry > Date.now()) {
-          return cached.data;
-        } else if (cached) {
-          // Expired, remove from memory cache
-          memoryCache.delete(key);
+      // Get today's snapshot (or target date snapshot)
+      const todaySnapshot = await this.getTodaySnapshot(userId, targetDate);
+      if (!todaySnapshot) {
+        console.log('❌ No snapshot found for target date');
+        return {};
+      }
+
+      // Get yesterday's snapshot
+      const yesterdaySnapshot = await this.getYesterdaySnapshot(userId, targetDate);
+      
+      console.log(`📈 Today's snapshot: ${todaySnapshot.positions?.length || 0} positions`);
+      console.log(`📉 Yesterday's snapshot: ${yesterdaySnapshot?.positions?.length || 0} positions`);
+
+      const apyResults = {};
+
+      // Process each position in today's snapshot
+      for (const position of (todaySnapshot.positions || [])) {
+        const positionId = this.generatePositionId(position);
+        
+        console.log(`🧮 Calculating APY for position: ${positionId}`);
+        
+        const apyData = await this.calculatePositionAPY(
+          position,
+          yesterdaySnapshot,
+          todaySnapshot.date,
+          yesterdaySnapshot?.date
+        );
+        
+        if (apyData) {
+          apyResults[positionId] = apyData;
+          console.log(`✅ APY calculated for ${positionId}: ${apyData.apy?.toFixed(2) || 'N/A'}%`);
         }
+      }
+
+      console.log(`📊 Total positions with APY data: ${Object.keys(apyResults).length}`);
+      return apyResults;
+
+    } catch (error) {
+      console.error('❌ Error calculating APYs:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Calculate APY for a single position
+   * @param {Object} todayPosition - Position data from today's snapshot
+   * @param {Object} yesterdaySnapshot - Yesterday's complete snapshot
+   * @param {Date} todayDate - Today's date
+   * @param {Date} yesterdayDate - Yesterday's date
+   * @returns {Object} - APY calculation result
+   */
+  static async calculatePositionAPY(todayPosition, yesterdaySnapshot, todayDate, yesterdayDate) {
+    try {
+      const positionId = this.generatePositionId(todayPosition);
+      
+      // Validate position data
+      const currentValue = todayPosition.totalUsdValue || 0;
+      const unclaimedRewards = this.calculateUnclaimedRewards(todayPosition);
+      
+      if (currentValue <= 0) {
+        console.log(`⚠️ Position ${positionId} has no value, skipping APY calculation`);
         return null;
       }
+
+      // Check if position existed yesterday
+      const yesterdayPosition = this.findPositionInSnapshot(positionId, yesterdaySnapshot);
+      
+      if (!yesterdayPosition) {
+        // NEW POSITION: Assume exactly 1 day old
+        return this.calculateNewPositionAPY(todayPosition, unclaimedRewards, currentValue, positionId);
+      } else {
+        // EXISTING POSITION: Calculate based on actual time difference
+        return this.calculateExistingPositionAPY(
+          todayPosition, 
+          yesterdayPosition, 
+          todayDate, 
+          yesterdayDate, 
+          currentValue,
+          positionId
+        );
+      }
+
     } catch (error) {
-      console.error('Cache get error:', error);
+      console.error('❌ Error calculating position APY:', error);
       return null;
     }
   }
 
   /**
-   * Set data in cache (Redis or memory fallback)
+   * Calculate APY for new positions (1-day assumption)
+   * Formula: APY = (unclaimed_rewards / position_value) * 365
    */
-  static async setInCache(key, data, ttlSeconds) {
-    try {
-      if (redisClient && redisClient.connected) {
-        await redisClient.setex(key, ttlSeconds, JSON.stringify(data));
-      } else {
-        // Fallback to memory cache with expiry
-        const expiry = Date.now() + (ttlSeconds * 1000);
-        memoryCache.set(key, { data, expiry });
-        
-        // Cleanup memory cache if it gets too large
-        if (memoryCache.size > this.CACHE_CONFIG.MAX_MEMORY_CACHE_SIZE) {
-          this.cleanupMemoryCache();
-        }
-      }
-    } catch (error) {
-      console.error('Cache set error:', error);
-    }
-  }
-
-  /**
-   * Invalidate cache entries matching a pattern
-   */
-  static async invalidateCache(pattern) {
-    try {
-      if (redisClient && redisClient.connected) {
-        const keys = await redisClient.keys(pattern);
-        if (keys.length > 0) {
-          await redisClient.del(keys);
-        }
-      } else {
-        // For memory cache, manually check each key
-        const keysToDelete = [];
-        for (const key of memoryCache.keys()) {
-          if (key.includes(pattern.replace('*', ''))) {
-            keysToDelete.push(key);
-          }
-        }
-        keysToDelete.forEach(key => memoryCache.delete(key));
-      }
-    } catch (error) {
-      console.error('Cache invalidation error:', error);
-    }
-  }
-
-  /**
-   * Cleanup expired entries from memory cache
-   */
-  static cleanupMemoryCache() {
-    const now = Date.now();
-    const expiredKeys = [];
+  static calculateNewPositionAPY(position, unclaimedRewards, currentValue, positionId) {
+    console.log(`🆕 New position detected: ${positionId} (assuming 1 day old)`);
     
-    for (const [key, value] of memoryCache.entries()) {
-      if (value.expiry <= now) {
-        expiredKeys.push(key);
-      }
-    }
-    
-    expiredKeys.forEach(key => memoryCache.delete(key));
-    
-    // If still too large, remove oldest entries
-    if (memoryCache.size > this.CACHE_CONFIG.MAX_MEMORY_CACHE_SIZE) {
-      const entries = Array.from(memoryCache.entries())
-        .sort((a, b) => a[1].expiry - b[1].expiry);
-      
-      const toRemove = entries.slice(0, Math.floor(this.CACHE_CONFIG.MAX_MEMORY_CACHE_SIZE * 0.2));
-      toRemove.forEach(([key]) => memoryCache.delete(key));
-    }
-  }
-
-  /**
-   * Generate cache key for APY calculation
-   */
-  static generateAPYCacheKey(userId, debankPositionId, targetDate) {
-    const dateStr = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD
-    return `${this.CACHE_CONFIG.PREFIX_APY}${userId}:${debankPositionId}:${dateStr}`;
-  }
-
-  /**
-   * Generate cache key for portfolio performance
-   */
-  static generatePortfolioCacheKey(userId, targetDate) {
-    const dateStr = targetDate.toISOString().split('T')[0];
-    return `${this.CACHE_CONFIG.PREFIX_PORTFOLIO}${userId}:${dateStr}`;
-  }
-
-  /**
-   * Calculate portfolio performance for different time periods
-   * Uses DailySnapshot data for portfolio-level calculations
-   */
-  static async calculatePortfolioPerformance(userId, targetDate = new Date()) {
-    // Check cache first
-    const cacheKey = this.generatePortfolioCacheKey(userId, targetDate);
-    const cached = await this.getFromCache(cacheKey);
-    
-    if (cached) {
-      console.log(`Portfolio performance cache hit for user ${userId}`);
-      return cached;
+    if (unclaimedRewards <= 0) {
+      console.log(`⚠️ No unclaimed rewards for new position ${positionId}`);
+      return {
+        apy: 0,
+        periodReturn: 0,
+        days: 1,
+        isNewPosition: true,
+        calculationMethod: 'new_position_1_day_assumption',
+        currentValue: currentValue,
+        unclaimedRewards: unclaimedRewards,
+        confidence: 'low', // Low confidence for new positions
+        notes: 'Assumed 1 day old - actual age unknown'
+      };
     }
 
-    const results = {
-      daily: null,
-      weekly: null,
-      monthly: null,
-      sixMonth: null,
-      allTime: null
+    // APY = (unclaimed_rewards / position_value) * 365
+    const dailyReturn = unclaimedRewards / currentValue;
+    const apy = dailyReturn * 365 * 100; // Convert to percentage
+
+    console.log(`📈 New position APY: ${apy.toFixed(2)}% (rewards: $${unclaimedRewards.toFixed(2)}, value: $${currentValue.toFixed(2)})`);
+
+    return {
+      apy: Math.round(apy * 100) / 100, // Round to 2 decimal places
+      periodReturn: Math.round(dailyReturn * 10000) / 100, // Daily return as percentage
+      days: 1,
+      isNewPosition: true,
+      calculationMethod: 'new_position_1_day_assumption',
+      currentValue: currentValue,
+      unclaimedRewards: unclaimedRewards,
+      confidence: this.assessConfidence(apy, true),
+      notes: 'Assumed 1 day old based on unclaimed rewards'
     };
+  }
 
-    try {
-      // Get current portfolio snapshot
-      const currentSnapshot = await DailySnapshot.findOne({
+  /**
+   * Calculate APY for existing positions based on value change
+   */
+  static calculateExistingPositionAPY(todayPosition, yesterdayPosition, todayDate, yesterdayDate, currentValue, positionId) {
+    console.log(`📊 Existing position detected: ${positionId}`);
+    
+    const yesterdayValue = yesterdayPosition.totalUsdValue || 0;
+    
+    if (yesterdayValue <= 0) {
+      console.log(`⚠️ Yesterday's value is zero for ${positionId}, treating as new position`);
+      const unclaimedRewards = this.calculateUnclaimedRewards(todayPosition);
+      return this.calculateNewPositionAPY(todayPosition, unclaimedRewards, currentValue, positionId);
+    }
+
+    // Calculate actual time difference
+    const timeDiffMs = todayDate - yesterdayDate;
+    const actualDays = Math.max(0.1, timeDiffMs / (1000 * 60 * 60 * 24)); // Minimum 0.1 days
+
+    // Calculate value change
+    const valueChange = currentValue - yesterdayValue;
+    const periodReturn = valueChange / yesterdayValue;
+    
+    // Annualize the return: APY = ((1 + period_return) ^ (365/days)) - 1
+    const annualizationFactor = 365 / actualDays;
+    const annualizedReturn = Math.pow(1 + periodReturn, annualizationFactor) - 1;
+    const apy = annualizedReturn * 100;
+
+    console.log(`📈 Existing position APY: ${apy.toFixed(2)}% over ${actualDays.toFixed(2)} days (${yesterdayValue.toFixed(2)} → ${currentValue.toFixed(2)})`);
+
+    return {
+      apy: Math.round(apy * 100) / 100,
+      periodReturn: Math.round(periodReturn * 10000) / 100,
+      days: Math.round(actualDays * 100) / 100,
+      isNewPosition: false,
+      calculationMethod: 'existing_position_value_change',
+      currentValue: currentValue,
+      yesterdayValue: yesterdayValue,
+      valueChange: valueChange,
+      confidence: this.assessConfidence(apy, false),
+      notes: `Based on ${actualDays.toFixed(1)} day value change`
+    };
+  }
+
+  /**
+   * Get today's snapshot (or target date snapshot)
+   */
+  static async getTodaySnapshot(userId, targetDate) {
+    // Find snapshot for the target date (within the same day)
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const snapshot = await DailySnapshot.findOne({
+      userId,
+      date: { $gte: startOfDay, $lte: endOfDay }
+    }).sort({ date: -1 });
+
+    if (!snapshot) {
+      // If no snapshot for exact date, get the most recent one before target date
+      return await DailySnapshot.findOne({
         userId,
         date: { $lte: targetDate }
       }).sort({ date: -1 });
-
-      if (!currentSnapshot) {
-        // Cache empty results for short time to prevent repeated queries
-        await this.setInCache(cacheKey, results, 300); // 5 minutes
-        return results;
-      }
-
-      const currentValue = currentSnapshot.totalNav || 0;
-
-      // Calculate performance for different time periods
-      const periods = [
-        { name: 'daily', days: 1 },
-        { name: 'weekly', days: 7 },
-        { name: 'monthly', days: 30 },
-        { name: 'sixMonth', days: 180 }
-      ];
-
-      for (const period of periods) {
-        const historicalDate = new Date(targetDate);
-        historicalDate.setDate(historicalDate.getDate() - period.days);
-
-        const historicalSnapshot = await DailySnapshot.findOne({
-          userId,
-          date: { $gte: historicalDate, $lt: targetDate }
-        }).sort({ date: 1 });
-
-        if (historicalSnapshot && historicalSnapshot.totalNav > 0) {
-          const historicalValue = historicalSnapshot.totalNav;
-          const periodReturn = ((currentValue / historicalValue) - 1) * 100;
-          
-          results[period.name] = {
-            performance: periodReturn,
-            currentValue,
-            historicalValue,
-            days: period.days,
-            periodStart: historicalSnapshot.date
-          };
-        }
-      }
-
-      // Calculate all-time performance from first available snapshot
-      const firstSnapshot = await DailySnapshot.findOne({ userId }).sort({ date: 1 });
-      
-      if (firstSnapshot && firstSnapshot.totalNav > 0) {
-        const daysHeld = Math.max(1, (targetDate - firstSnapshot.date) / (1000 * 60 * 60 * 24));
-        const totalReturn = ((currentValue / firstSnapshot.totalNav) - 1) * 100;
-        
-        results.allTime = {
-          performance: totalReturn,
-          currentValue,
-          historicalValue: firstSnapshot.totalNav,
-          days: Math.ceil(daysHeld),
-          periodStart: firstSnapshot.date
-        };
-      }
-
-      // Cache successful results
-      await this.setInCache(cacheKey, results, this.CACHE_CONFIG.PORTFOLIO_PERFORMANCE_TTL);
-      console.log(`Portfolio performance calculated and cached for user ${userId}`);
-      
-      return results;
-    } catch (error) {
-      console.error('Error calculating portfolio performance:', error);
-      // Cache error results for short time to prevent repeated failures
-      await this.setInCache(cacheKey, results, 60); // 1 minute
-      return results;
     }
+
+    return snapshot;
   }
 
   /**
-   * Calculate APY for a specific position with comprehensive validation and outlier detection
+   * Get yesterday's snapshot
    */
-  static async calculatePositionAPY(userId, debankPositionId, targetDate = new Date()) {
-    try {
-      // Pre-validation: Check input parameters
-      const validationResult = this.validateInputParameters(userId, debankPositionId, targetDate);
-      if (!validationResult.isValid) {
-        return this.createValidationErrorResult(validationResult.errors);
-      }
-
-      // Check cache first
-      const cacheKey = this.generateAPYCacheKey(userId, debankPositionId, targetDate);
-      const cached = await this.getFromCache(cacheKey);
-      
-      if (cached) {
-        console.log(`APY cache hit for position ${debankPositionId}`);
-        return cached;
-      }
-
-      // Get raw APY calculation
-      const rawResult = await PositionHistory.calculatePositionAPY(userId, debankPositionId, targetDate);
-      
-      // Post-validation: Apply outlier detection and data quality checks
-      const validatedResult = await this.validateAndEnhanceAPYResult(rawResult, userId, debankPositionId, targetDate);
-      
-      // Cache the validated result
-      const ttl = this.determineCacheTTL(validatedResult);
-      await this.setInCache(cacheKey, validatedResult, ttl);
-      console.log(`APY calculated and cached for position ${debankPositionId} (TTL: ${ttl}s)`);
-      
-      return validatedResult;
-    } catch (error) {
-      console.error('Error in calculatePositionAPY:', error);
-      const errorResult = this.createSystemErrorResult(error.message);
-      
-      // Cache error results for short time to prevent repeated failures
-      const cacheKey = this.generateAPYCacheKey(userId, debankPositionId, targetDate);
-      await this.setInCache(cacheKey, errorResult, 60); // 1 minute
-      
-      return errorResult;
-    }
-  }
-
-  /**
-   * Determine cache TTL based on data quality and confidence
-   */
-  static determineCacheTTL(apyResult) {
-    if (!apyResult || !apyResult._qualityMetrics) {
-      return 300; // 5 minutes for low quality data
-    }
-
-    const qualityMetrics = apyResult._qualityMetrics;
-    const overallConfidence = qualityMetrics.overallConfidence;
-    const dataCompleteness = qualityMetrics.dataCompleteness;
-
-    // High quality data can be cached longer
-    if (overallConfidence === 'high' && dataCompleteness >= 80) {
-      return this.CACHE_CONFIG.APY_CALCULATION_TTL; // 1 hour
-    } else if (overallConfidence === 'medium' && dataCompleteness >= 60) {
-      return this.CACHE_CONFIG.APY_CALCULATION_TTL / 2; // 30 minutes
-    } else {
-      return this.CACHE_CONFIG.APY_CALCULATION_TTL / 4; // 15 minutes
-    }
-  }
-
-  /**
-   * Validate input parameters for APY calculation
-   */
-  static validateInputParameters(userId, debankPositionId, targetDate) {
-    const errors = [];
-
-    // Validate userId
-    if (!userId) {
-      errors.push('User ID is required');
-    } else if (typeof userId !== 'string' && typeof userId !== 'object') {
-      errors.push('User ID must be a valid string or ObjectId');
-    }
-
-    // Validate debankPositionId
-    if (!debankPositionId) {
-      errors.push('Debank Position ID is required');
-    } else if (typeof debankPositionId !== 'string') {
-      errors.push('Debank Position ID must be a string');
-    } else if (debankPositionId.length < 3) {
-      errors.push('Debank Position ID is too short');
-    }
-
-    // Validate targetDate
-    if (!targetDate) {
-      errors.push('Target date is required');
-    } else if (!(targetDate instanceof Date)) {
-      errors.push('Target date must be a valid Date object');
-    } else if (isNaN(targetDate.getTime())) {
-      errors.push('Target date is invalid');
-    } else {
-      // Check if target date is too far in the future
-      const now = new Date();
-      const daysDiff = (targetDate - now) / (1000 * 60 * 60 * 24);
-      if (daysDiff > 1) {
-        errors.push('Target date cannot be more than 1 day in the future');
-      }
-      
-      // Check if target date is too far in the past (more than 5 years)
-      if (daysDiff < -1825) {
-        errors.push('Target date cannot be more than 5 years in the past');
-      }
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  }
-
-  /**
-   * Validate and enhance APY calculation results with outlier detection
-   */
-  static async validateAndEnhanceAPYResult(rawResult, userId, debankPositionId, targetDate) {
-    if (!rawResult || typeof rawResult !== 'object') {
-      return this.createValidationErrorResult(['Invalid APY calculation result']);
-    }
-
-    const enhancedResult = { ...rawResult };
+  static async getYesterdaySnapshot(userId, targetDate) {
+    const yesterday = new Date(targetDate);
+    yesterday.setDate(yesterday.getDate() - 1);
     
-    // Apply validation to each period
-    for (const [period, data] of Object.entries(rawResult)) {
-      if (data && typeof data === 'object') {
-        enhancedResult[period] = await this.validatePeriodAPY(data, period, userId, debankPositionId, targetDate);
-      }
-    }
-
-    // Cross-period validation
-    enhancedResult._qualityMetrics = await this.calculateDataQualityMetrics(enhancedResult, userId, debankPositionId);
+    const startOfYesterday = new Date(yesterday);
+    startOfYesterday.setHours(0, 0, 0, 0);
     
-    return enhancedResult;
-  }
+    const endOfYesterday = new Date(yesterday);
+    endOfYesterday.setHours(23, 59, 59, 999);
 
-  /**
-   * Validate individual period APY data
-   */
-  static async validatePeriodAPY(periodData, periodName, userId, debankPositionId, targetDate) {
-    const validated = { ...periodData };
-    
-    if (!periodData.apy && periodData.apy !== 0) {
-      return validated; // Skip validation for null/undefined APY
-    }
+    const snapshot = await DailySnapshot.findOne({
+      userId,
+      date: { $gte: startOfYesterday, $lte: endOfYesterday }
+    }).sort({ date: -1 });
 
-    // Statistical outlier detection
-    const outlierFlags = await this.detectStatisticalOutliers(periodData, periodName, userId, debankPositionId);
-    
-    // Historical context validation
-    const historicalFlags = await this.validateAgainstHistoricalContext(periodData, periodName, userId, debankPositionId, targetDate);
-    
-    // Market context validation
-    const marketFlags = this.validateAgainstMarketContext(periodData, periodName);
-    
-    // Combine all validation flags
-    validated.validationFlags = {
-      outliers: outlierFlags,
-      historical: historicalFlags,
-      market: marketFlags
-    };
-
-    // Adjust confidence based on validation flags
-    validated.confidence = this.calculateAdjustedConfidence(
-      validated.confidence || 'medium',
-      validated.validationFlags
-    );
-
-    // Add enhanced warnings
-    validated.warnings = [
-      ...(validated.warnings || []),
-      ...this.generateValidationWarnings(validated.validationFlags)
-    ];
-
-    return validated;
-  }
-
-  /**
-   * Detect statistical outliers using multiple methods
-   */
-  static async detectStatisticalOutliers(periodData, periodName, userId, debankPositionId) {
-    const flags = {
-      isStatisticalOutlier: false,
-      outlierMethods: [],
-      severity: 'low'
-    };
-
-    const apy = periodData.apy;
-    if (!apy && apy !== 0) return flags;
-
-    // Method 1: Z-Score Analysis (compared to historical data)
-    const historicalAPYs = await this.getHistoricalAPYs(userId, debankPositionId, periodName, 30); // Last 30 calculations
-    if (historicalAPYs.length >= 3) {
-      const zScore = this.calculateZScore(apy, historicalAPYs);
-      if (Math.abs(zScore) > 3) {
-        flags.isStatisticalOutlier = true;
-        flags.outlierMethods.push('z-score');
-        flags.severity = Math.abs(zScore) > 5 ? 'high' : 'medium';
-      }
-    }
-
-    // Method 2: Interquartile Range (IQR) Analysis
-    if (historicalAPYs.length >= 5) {
-      const iqrResult = this.calculateIQROutlier(apy, historicalAPYs);
-      if (iqrResult.isOutlier) {
-        flags.isStatisticalOutlier = true;
-        flags.outlierMethods.push('iqr');
-        flags.severity = Math.max(flags.severity === 'high' ? 3 : flags.severity === 'medium' ? 2 : 1, 
-                                 iqrResult.severity === 'high' ? 3 : 2) === 3 ? 'high' : 'medium';
-      }
-    }
-
-    // Method 3: Percentage Change Analysis
-    if (periodData.historicalValue && periodData.positionValue) {
-      const percentChange = Math.abs((periodData.positionValue / periodData.historicalValue) - 1) * 100;
-      if (percentChange > 50) { // More than 50% change
-        flags.isStatisticalOutlier = true;
-        flags.outlierMethods.push('percentage-change');
-        flags.severity = percentChange > 100 ? 'high' : 'medium';
-      }
-    }
-
-    // Method 4: Time-based Volatility Analysis
-    if (periodData.days < 7 && Math.abs(apy) > 500) {
-      flags.isStatisticalOutlier = true;
-      flags.outlierMethods.push('short-term-volatility');
-      flags.severity = 'high';
-    }
-
-    return flags;
-  }
-
-  /**
-   * Validate against historical context for the same position
-   */
-  static async validateAgainstHistoricalContext(periodData, periodName, userId, debankPositionId, targetDate) {
-    const flags = {
-      hasHistoricalData: false,
-      isHistoricalAnomaly: false,
-      historicalDeviation: 0,
-      trendAnalysis: null
-    };
-
-    // Get last 10 APY calculations for trend analysis
-    const recentAPYs = await this.getHistoricalAPYs(userId, debankPositionId, periodName, 10);
-    
-    if (recentAPYs.length >= 2) {
-      flags.hasHistoricalData = true;
-      
-      // Calculate historical average and deviation
-      const avgAPY = recentAPYs.reduce((sum, apy) => sum + apy, 0) / recentAPYs.length;
-      const deviation = Math.abs(periodData.apy - avgAPY);
-      const relativeDeviation = avgAPY !== 0 ? (deviation / Math.abs(avgAPY)) * 100 : 100;
-      
-      flags.historicalDeviation = relativeDeviation;
-      
-      // Flag as anomaly if deviation is > 200%
-      if (relativeDeviation > 200) {
-        flags.isHistoricalAnomaly = true;
-      }
-
-      // Trend analysis
-      if (recentAPYs.length >= 3) {
-        flags.trendAnalysis = this.analyzeTrend(recentAPYs);
-      }
-    }
-
-    return flags;
-  }
-
-  /**
-   * Validate against market context and expected ranges
-   */
-  static validateAgainstMarketContext(periodData, periodName) {
-    const flags = {
-      isMarketOutlier: false,
-      marketContext: null,
-      expectedRange: null
-    };
-
-    const apy = periodData.apy;
-    if (!apy && apy !== 0) return flags;
-
-    // Define expected APY ranges for different market contexts
-    const marketRanges = {
-      'stable_defi': { min: 0, max: 50, description: 'Stable DeFi protocols' },
-      'lending': { min: 0, max: 25, description: 'Lending protocols' },
-      'liquidity_provision': { min: -20, max: 200, description: 'Liquidity provision' },
-      'yield_farming': { min: -50, max: 1000, description: 'Yield farming' },
-      'extreme_risk': { min: -100, max: 10000, description: 'Extreme risk protocols' }
-    };
-
-    // Determine market context based on APY magnitude
-    let marketContext = 'stable_defi';
-    if (Math.abs(apy) > 1000) {
-      marketContext = 'extreme_risk';
-    } else if (Math.abs(apy) > 200) {
-      marketContext = 'yield_farming';
-    } else if (Math.abs(apy) > 50) {
-      marketContext = 'liquidity_provision';
-    } else if (Math.abs(apy) > 25) {
-      marketContext = 'lending';
-    }
-
-    const range = marketRanges[marketContext];
-    flags.marketContext = marketContext;
-    flags.expectedRange = range;
-
-    // Check if APY is outside expected range for the context
-    if (apy < range.min || apy > range.max) {
-      flags.isMarketOutlier = true;
-    }
-
-    return flags;
-  }
-
-  /**
-   * Calculate adjusted confidence based on validation flags
-   */
-  static calculateAdjustedConfidence(originalConfidence, validationFlags) {
-    let confidenceScore = originalConfidence === 'high' ? 3 : originalConfidence === 'medium' ? 2 : 1;
-
-    // Reduce confidence for outliers
-    if (validationFlags.outliers?.isStatisticalOutlier) {
-      confidenceScore -= validationFlags.outliers.severity === 'high' ? 2 : 1;
-    }
-
-    // Reduce confidence for historical anomalies
-    if (validationFlags.historical?.isHistoricalAnomaly) {
-      confidenceScore -= 1;
-    }
-
-    // Reduce confidence for market outliers
-    if (validationFlags.market?.isMarketOutlier) {
-      confidenceScore -= 1;
-    }
-
-    // Ensure minimum confidence
-    confidenceScore = Math.max(1, confidenceScore);
-
-    return confidenceScore === 3 ? 'high' : confidenceScore === 2 ? 'medium' : 'low';
-  }
-
-  /**
-   * Generate validation warnings based on flags
-   */
-  static generateValidationWarnings(validationFlags) {
-    const warnings = [];
-
-    if (validationFlags.outliers?.isStatisticalOutlier) {
-      const methods = validationFlags.outliers.outlierMethods.join(', ');
-      warnings.push(`Statistical outlier detected (${methods}) - verify data accuracy`);
-    }
-
-    if (validationFlags.historical?.isHistoricalAnomaly) {
-      const deviation = validationFlags.historical.historicalDeviation.toFixed(1);
-      warnings.push(`${deviation}% deviation from historical average - unusual performance`);
-    }
-
-    if (validationFlags.market?.isMarketOutlier) {
-      const context = validationFlags.market.expectedRange.description;
-      warnings.push(`APY outside expected range for ${context} - verify protocol type`);
-    }
-
-    if (validationFlags.historical?.trendAnalysis?.isVolatile) {
-      warnings.push('High volatility detected in recent APY calculations');
-    }
-
-    return warnings;
-  }
-
-  /**
-   * Calculate data quality metrics for the entire result set
-   */
-  static async calculateDataQualityMetrics(result, userId, debankPositionId) {
-    const metrics = {
-      overallConfidence: 'medium',
-      dataCompleteness: 0,
-      consistencyScore: 0,
-      reliabilityScore: 0,
-      lastDataUpdate: null
-    };
-
-    // Calculate data completeness
-    const periods = ['daily', 'weekly', 'monthly', 'sixMonth', 'allTime'];
-    const availablePeriods = periods.filter(period => result[period] && result[period].apy !== null);
-    metrics.dataCompleteness = (availablePeriods.length / periods.length) * 100;
-
-    // Calculate consistency score (how similar are the confidence levels)
-    const confidenceLevels = availablePeriods.map(period => result[period].confidence);
-    const highConfidence = confidenceLevels.filter(c => c === 'high').length;
-    metrics.consistencyScore = (highConfidence / confidenceLevels.length) * 100;
-
-    // Calculate overall confidence
-    const avgConfidenceScore = confidenceLevels.reduce((sum, conf) => {
-      return sum + (conf === 'high' ? 3 : conf === 'medium' ? 2 : 1);
-    }, 0) / confidenceLevels.length;
-
-    metrics.overallConfidence = avgConfidenceScore >= 2.5 ? 'high' : avgConfidenceScore >= 1.5 ? 'medium' : 'low';
-
-    // Get last data update
-    try {
-      const lastPosition = await PositionHistory.findOne({
+    if (!snapshot) {
+      // If no snapshot for exact yesterday, get the most recent one before yesterday
+      return await DailySnapshot.findOne({
         userId,
-        debankPositionId,
-        isActive: true
+        date: { $lt: startOfYesterday }
       }).sort({ date: -1 });
-      
-      if (lastPosition) {
-        metrics.lastDataUpdate = lastPosition.date;
-      }
-    } catch (error) {
-      console.error('Error getting last data update:', error);
     }
 
-    return metrics;
+    return snapshot;
   }
 
   /**
-   * Calculate APY for all positions of a user with intelligent caching
+   * Generate a unique position ID from position data
    */
-  static async calculateAllPositionAPYs(userId, targetDate = new Date()) {
-    try {
-      // Check if we have a cached summary for all positions
-      const summaryCacheKey = `${this.CACHE_CONFIG.PREFIX_SUMMARY}${userId}:${targetDate.toISOString().split('T')[0]}`;
-      const cachedSummary = await this.getFromCache(summaryCacheKey);
-      
-      if (cachedSummary) {
-        console.log(`All positions APY cache hit for user ${userId}`);
-        return cachedSummary;
-      }
-
-      // Get all active positions for the user using Debank position IDs
-      const activePositions = await PositionHistory.distinct('debankPositionId', {
-        userId,
-        date: { $lte: targetDate },
-        isActive: true
-      });
-
-      const apyResults = {};
-      const cacheHits = [];
-      const cacheMisses = [];
-
-      // Calculate APY for each position (leveraging individual position caching)
-      for (const debankPositionId of activePositions) {
-        const cacheKey = this.generateAPYCacheKey(userId, debankPositionId, targetDate);
-        const cached = await this.getFromCache(cacheKey);
-        
-        if (cached) {
-          apyResults[debankPositionId] = cached;
-          cacheHits.push(debankPositionId);
-        } else {
-          apyResults[debankPositionId] = await this.calculatePositionAPY(userId, debankPositionId, targetDate);
-          cacheMisses.push(debankPositionId);
-        }
-      }
-
-      console.log(`APY calculation summary for user ${userId}: ${cacheHits.length} cache hits, ${cacheMisses.length} cache misses`);
-
-      // Cache the complete summary
-      await this.setInCache(summaryCacheKey, apyResults, this.CACHE_CONFIG.POSITION_SUMMARY_TTL);
-
-      return apyResults;
-    } catch (error) {
-      console.error('Error calculating all position APYs:', error);
-      return {};
-    }
-  }
-
-  /**
-   * Warm cache for critical positions (can be called during off-peak hours)
-   */
-  static async warmCache(userId, targetDate = new Date()) {
-    try {
-      console.log(`Starting cache warming for user ${userId}`);
-      
-      // Get all active positions
-      const activePositions = await PositionHistory.distinct('debankPositionId', {
-        userId,
-        date: { $lte: targetDate },
-        isActive: true
-      });
-
-      // Calculate APY for positions not in cache
-      const warmingTasks = activePositions.map(async (debankPositionId) => {
-        const cacheKey = this.generateAPYCacheKey(userId, debankPositionId, targetDate);
-        const cached = await this.getFromCache(cacheKey);
-        
-        if (!cached) {
-          await this.calculatePositionAPY(userId, debankPositionId, targetDate);
-        }
-      });
-
-      await Promise.all(warmingTasks);
-      console.log(`Cache warming completed for user ${userId}: ${activePositions.length} positions`);
-      
-    } catch (error) {
-      console.error('Error warming cache:', error);
-    }
-  }
-
-  /**
-   * Invalidate all cached data for a user (call when new position data arrives)
-   */
-  static async invalidateUserCache(userId) {
-    try {
-      const patterns = [
-        `${this.CACHE_CONFIG.PREFIX_APY}${userId}:*`,
-        `${this.CACHE_CONFIG.PREFIX_PORTFOLIO}${userId}:*`,
-        `${this.CACHE_CONFIG.PREFIX_SUMMARY}${userId}:*`
-      ];
-
-      for (const pattern of patterns) {
-        await this.invalidateCache(pattern);
-      }
-
-      console.log(`Cache invalidated for user ${userId}`);
-    } catch (error) {
-      console.error('Error invalidating user cache:', error);
-    }
-  }
-
-  /**
-   * Invalidate cache for a specific position (call when position data changes)
-   */
-  static async invalidatePositionCache(userId, debankPositionId) {
-    try {
-      const pattern = `${this.CACHE_CONFIG.PREFIX_APY}${userId}:${debankPositionId}:*`;
-      await this.invalidateCache(pattern);
-      
-      // Also invalidate summary cache since it includes this position
-      const summaryPattern = `${this.CACHE_CONFIG.PREFIX_SUMMARY}${userId}:*`;
-      await this.invalidateCache(summaryPattern);
-
-      console.log(`Cache invalidated for position ${debankPositionId}`);
-    } catch (error) {
-      console.error('Error invalidating position cache:', error);
-    }
-  }
-
-  /**
-   * Get cache statistics for monitoring
-   */
-  static async getCacheStats() {
-    try {
-      const stats = {
-        cacheType: redisClient && redisClient.connected ? 'redis' : 'memory',
-        memorySize: memoryCache.size,
-        redisConnected: redisClient ? redisClient.connected : false
-      };
-
-      if (redisClient && redisClient.connected) {
-        // Get Redis stats
-        const info = await redisClient.info('memory');
-        stats.redisMemoryUsage = info;
-      }
-
-      return stats;
-    } catch (error) {
-      console.error('Error getting cache stats:', error);
-      return { error: error.message };
-    }
-  }
-
-  /**
-   * Store position data for historical tracking using Debank position IDs
-   */
-  static async storePositionData(userId, walletAddress, protocolName, positionData) {
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // Normalize to start of day
-      const affectedPositions = [];
-
-      for (const position of positionData) {
-        // Use Debank position ID if available, otherwise generate one
-        const debankPositionId = position.position_id || 
-          `${protocolName}_${position.position_name}_${walletAddress}_${Date.now()}`.toLowerCase().replace(/\s+/g, '_');
-        
-        affectedPositions.push(debankPositionId);
-        
-        // Calculate unclaimed rewards value
-        const unclaimedRewardsValue = (position.rewards || [])
-          .reduce((sum, reward) => sum + (reward.usd_value || 0), 0);
-
-        // Calculate total position value
-        const totalValue = this.calculatePositionValue(position);
-
-        // Store today's position data using new schema
-        const positionHistory = new PositionHistory({
-          userId,
-          walletAddress,
-          protocolName,
-          positionName: position.position_name || 'Unknown Position',
-          debankPositionId,
-          date: today,
-          totalValue,
-          unclaimedRewardsValue,
-          tokens: position.tokens || [],
-          rewards: position.rewards || [],
-          isActive: true,
-          protocolData: {
-            originalData: position
-          }
-        });
-
-        await positionHistory.save();
-      }
-
-      // Invalidate cache for affected positions since new data arrived
-      for (const debankPositionId of affectedPositions) {
-        await this.invalidatePositionCache(userId, debankPositionId);
-      }
-
-      // Also invalidate user-level caches
-      await this.invalidateUserCache(userId);
-      
-      console.log(`Stored position data and invalidated cache for ${affectedPositions.length} positions`);
-      
-    } catch (error) {
-      console.error('Error storing position data:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Initialize periodic cache cleanup (call once at app startup)
-   */
-  static initializeCacheCleanup() {
-    // Setup periodic memory cache cleanup
-    setInterval(() => {
-      if (!redisClient || !redisClient.connected) {
-        this.cleanupMemoryCache();
-        console.log(`Memory cache cleanup completed. Current size: ${memoryCache.size}`);
-      }
-    }, this.CACHE_CONFIG.MEMORY_CACHE_CLEANUP_INTERVAL);
-
-    console.log('Cache cleanup interval initialized');
-  }
-
-  /**
-   * Mark positions as inactive if they no longer exist
-   */
-  static async markInactivePositions(userId, activeDebankPositionIds) {
-    try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      // Find positions that were active yesterday but not today
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-
-      await PositionHistory.updateMany({
-        userId,
-        date: { $gte: yesterday },
-        debankPositionId: { $nin: activeDebankPositionIds },
-        isActive: true
-      }, {
-        isActive: false
-      });
-    } catch (error) {
-      console.error('Error marking inactive positions:', error);
-    }
-  }
-
-  /**
-   * Calculate total USD value of a position
-   */
-  static calculatePositionValue(position) {
-    let totalValue = 0;
-
-    // Add token values
-    if (position.tokens) {
-      totalValue += position.tokens.reduce((sum, token) => sum + (token.usd_value || 0), 0);
-    }
-
-    // Add reward values
-    if (position.rewards) {
-      totalValue += position.rewards.reduce((sum, reward) => sum + (reward.usd_value || 0), 0);
-    }
-
-    return totalValue;
-  }
-
-  /**
-   * Get position performance summary with APY data
-   */
-  static async getPositionPerformanceSummary(userId, targetDate = new Date()) {
-    try {
-      const apyData = await this.calculateAllPositionAPYs(userId, targetDate);
-      const positionSummaries = {};
-
-      // Get latest position data for each active position
-      for (const debankPositionId of Object.keys(apyData)) {
-        const latestPosition = await PositionHistory.findOne({
-          userId,
-          debankPositionId,
-          date: { $lte: targetDate },
-          isActive: true
-        }).sort({ date: -1 });
-
-        if (latestPosition) {
-          positionSummaries[debankPositionId] = {
-            protocolName: latestPosition.protocolName,
-            positionName: latestPosition.positionName,
-            walletAddress: latestPosition.walletAddress,
-            currentValue: latestPosition.totalValue,
-            unclaimedRewardsValue: latestPosition.unclaimedRewardsValue,
-            apy: apyData[debankPositionId],
-            lastUpdated: latestPosition.date,
-            debankPositionId: latestPosition.debankPositionId
-          };
-        }
-      }
-
-      return positionSummaries;
-    } catch (error) {
-      console.error('Error getting position performance summary:', error);
-      return {};
-    }
-  }
-
-  /**
-   * Helper method to get historical APY values for statistical analysis
-   */
-  static async getHistoricalAPYs(userId, debankPositionId, periodName, limit = 30) {
-    try {
-      // This would be implemented by storing calculated APY values in a separate collection
-      // For now, return empty array to avoid breaking the system
-      // TODO: Implement APY history tracking
-      console.log(`TODO: Get historical APYs for ${debankPositionId}, period: ${periodName}, limit: ${limit}, user: ${userId}`);
-      return [];
-    } catch (error) {
-      console.error('Error getting historical APYs:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Calculate Z-Score for outlier detection
-   */
-  static calculateZScore(value, historicalValues) {
-    if (historicalValues.length < 2) return 0;
+  static generatePositionId(position) {
+    // Create a consistent ID based on protocol and position characteristics
+    const protocol = (position.protocolName || 'unknown').toLowerCase().replace(/\s+/g, '_');
+    const id = position.protocolId || '';
+    const chain = position.chain || '';
     
-    const mean = historicalValues.reduce((sum, val) => sum + val, 0) / historicalValues.length;
-    const variance = historicalValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / historicalValues.length;
-    const standardDeviation = Math.sqrt(variance);
-    
-    if (standardDeviation === 0) return 0;
-    
-    return (value - mean) / standardDeviation;
+    // Use multiple fields to create unique identifier
+    return `${protocol}_${chain}_${id}`.replace(/[^a-z0-9_]/g, '');
   }
 
   /**
-   * Calculate IQR outlier detection
+   * Find a position in a snapshot by position ID
    */
-  static calculateIQROutlier(value, historicalValues) {
-    if (historicalValues.length < 4) return { isOutlier: false, severity: 'low' };
-    
-    const sorted = [...historicalValues].sort((a, b) => a - b);
-    const q1Index = Math.floor(sorted.length * 0.25);
-    const q3Index = Math.floor(sorted.length * 0.75);
-    
-    const q1 = sorted[q1Index];
-    const q3 = sorted[q3Index];
-    const iqr = q3 - q1;
-    
-    const lowerBound = q1 - 1.5 * iqr;
-    const upperBound = q3 + 1.5 * iqr;
-    const extremeLowerBound = q1 - 3 * iqr;
-    const extremeUpperBound = q3 + 3 * iqr;
-    
-    if (value < extremeLowerBound || value > extremeUpperBound) {
-      return { isOutlier: true, severity: 'high' };
-    } else if (value < lowerBound || value > upperBound) {
-      return { isOutlier: true, severity: 'medium' };
+  static findPositionInSnapshot(positionId, snapshot) {
+    if (!snapshot || !snapshot.positions) {
+      return null;
     }
-    
-    return { isOutlier: false, severity: 'low' };
+
+    return snapshot.positions.find(pos => {
+      const snapPositionId = this.generatePositionId(pos);
+      return snapPositionId === positionId;
+    });
   }
 
   /**
-   * Analyze trend in historical data
+   * Calculate total unclaimed rewards value for a position
    */
-  static analyzeTrend(values) {
-    if (values.length < 3) return { isVolatile: false, trend: 'insufficient_data' };
-    
-    // Calculate volatility (coefficient of variation)
-    const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-    const standardDeviation = Math.sqrt(variance);
-    const coefficientOfVariation = mean !== 0 ? (standardDeviation / Math.abs(mean)) * 100 : 100;
-    
-    // Calculate trend direction
-    const firstHalf = values.slice(0, Math.floor(values.length / 2));
-    const secondHalf = values.slice(Math.floor(values.length / 2));
-    const firstHalfAvg = firstHalf.reduce((sum, val) => sum + val, 0) / firstHalf.length;
-    const secondHalfAvg = secondHalf.reduce((sum, val) => sum + val, 0) / secondHalf.length;
-    
-    let trend = 'stable';
-    if (secondHalfAvg > firstHalfAvg * 1.1) {
-      trend = 'increasing';
-    } else if (secondHalfAvg < firstHalfAvg * 0.9) {
-      trend = 'decreasing';
+  static calculateUnclaimedRewards(position) {
+    if (!position.rewardTokens || !Array.isArray(position.rewardTokens)) {
+      return 0;
     }
-    
-    return {
-      isVolatile: coefficientOfVariation > 50, // More than 50% CV is considered volatile
-      trend,
-      volatility: coefficientOfVariation,
-      direction: secondHalfAvg > firstHalfAvg ? 'up' : 'down'
-    };
+
+    return position.rewardTokens.reduce((total, reward) => {
+      return total + (reward.usdValue || 0);
+    }, 0);
   }
 
   /**
-   * Create validation error result
+   * Assess confidence level for APY calculation
    */
-  static createValidationErrorResult(errors) {
-    return {
-      daily: {
-        apy: null,
-        periodReturn: null,
-        days: 0,
-        isNewPosition: false,
-        confidence: 'low',
-        warnings: errors,
-        calculationMethod: 'validation_error',
-        validationFlags: {
-          outliers: { isStatisticalOutlier: false, outlierMethods: [], severity: 'low' },
-          historical: { hasHistoricalData: false, isHistoricalAnomaly: false, historicalDeviation: 0 },
-          market: { isMarketOutlier: false, marketContext: null, expectedRange: null }
-        }
-      },
-      weekly: null,
-      monthly: null,
-      sixMonth: null,
-      allTime: null,
-      _qualityMetrics: {
-        overallConfidence: 'low',
-        dataCompleteness: 0,
-        consistencyScore: 0,
-        reliabilityScore: 0,
-        lastDataUpdate: null
-      }
-    };
+  static assessConfidence(apy, isNewPosition) {
+    if (isNewPosition) {
+      // New positions have lower confidence due to 1-day assumption
+      if (Math.abs(apy) > 1000) return 'very_low'; // Extreme APY
+      if (Math.abs(apy) > 100) return 'low';
+      return 'medium';
+    } else {
+      // Existing positions with historical data
+      if (Math.abs(apy) > 10000) return 'very_low'; // Extreme APY
+      if (Math.abs(apy) > 1000) return 'low';
+      if (Math.abs(apy) > 100) return 'medium';
+      return 'high';
+    }
   }
 
   /**
-   * Create system error result
-   */
-  static createSystemErrorResult(errorMessage) {
-    return {
-      daily: {
-        apy: null,
-        periodReturn: null,
-        days: 0,
-        isNewPosition: false,
-        confidence: 'low',
-        warnings: [`System error: ${errorMessage}`],
-        calculationMethod: 'system_error',
-        validationFlags: {
-          outliers: { isStatisticalOutlier: false, outlierMethods: [], severity: 'low' },
-          historical: { hasHistoricalData: false, isHistoricalAnomaly: false, historicalDeviation: 0 },
-          market: { isMarketOutlier: false, marketContext: null, expectedRange: null }
-        }
-      },
-      weekly: null,
-      monthly: null,
-      sixMonth: null,
-      allTime: null,
-      _qualityMetrics: {
-        overallConfidence: 'low',
-        dataCompleteness: 0,
-        consistencyScore: 0,
-        reliabilityScore: 0,
-        lastDataUpdate: null
-      }
-    };
-  }
-
-  /**
-   * Utility method to format APY data for frontend display
+   * Format APY data for display
    */
   static formatAPYForDisplay(apyData) {
-    const formatted = {};
+    if (!apyData) return null;
 
-    Object.entries(apyData).forEach(([period, data]) => {
-      if (data && data.apy !== null && data.apy !== undefined) {
-        formatted[period] = {
-          apy: `${data.apy >= 0 ? '+' : ''}${data.apy.toFixed(2)}%`,
-          periodReturn: `${data.periodReturn >= 0 ? '+' : ''}${data.periodReturn.toFixed(2)}%`,
-          days: data.days,
-          isPositive: data.apy >= 0,
-          rawAPY: data.apy,
-          rawPeriodReturn: data.periodReturn,
-          isNewPosition: data.isNewPosition || false,
-          confidence: data.confidence || 'medium',
-          warnings: data.warnings || [],
-          calculationMethod: data.calculationMethod || 'standard',
-          positionValue: data.positionValue || null,
-          rewardsValue: data.rewardsValue || null,
-          rawDailyReturn: data.rawDailyReturn || null
-        };
-      } else {
-        formatted[period] = {
-          apy: 'No data',
-          periodReturn: 'No data',
-          days: 0,
-          isPositive: null,
-          rawAPY: null,
-          rawPeriodReturn: null,
-          isNewPosition: false
-        };
-      }
-    });
-
-    return formatted;
+    return {
+      ...apyData,
+      formattedAPY: `${apyData.apy >= 0 ? '+' : ''}${apyData.apy.toFixed(2)}%`,
+      formattedValue: `$${apyData.currentValue.toLocaleString(undefined, { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      })}`,
+      confidenceLevel: apyData.confidence,
+      isReliable: ['high', 'medium'].includes(apyData.confidence)
+    };
   }
 }
 

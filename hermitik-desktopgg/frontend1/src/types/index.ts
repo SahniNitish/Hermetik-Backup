@@ -54,6 +54,7 @@ export interface PortfolioSummary {
 }
 
 export interface Wallet {
+  summary: any;
   id: string;
   address: string;
   name: string;

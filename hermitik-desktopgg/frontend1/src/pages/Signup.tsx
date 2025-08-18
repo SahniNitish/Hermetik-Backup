@@ -29,13 +29,13 @@ const Signup: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-hermetik-dark flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-white font-bold text-2xl">H</span>
+          <div className="w-16 h-16 bg-gradient-hermetik rounded-xl flex items-center justify-center mx-auto mb-4 shadow-hermetik">
+            <span className="text-white font-bold text-2xl font-heading">H</span>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">Create account</h1>
+          <h1 className="text-3xl font-bold text-white mb-2 font-heading">Create account</h1>
           <p className="text-gray-400">Start tracking your DeFi portfolio</p>
         </div>
 
@@ -56,7 +56,7 @@ const Signup: React.FC = () => {
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
                 placeholder="Enter your full name"
                 required
               />
@@ -71,7 +71,7 @@ const Signup: React.FC = () => {
                 id="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
                 placeholder="Enter your email"
                 required
               />
@@ -86,7 +86,7 @@ const Signup: React.FC = () => {
                 id="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
                 placeholder="Create a password"
                 required
               />
@@ -104,7 +104,7 @@ const Signup: React.FC = () => {
           <div className="mt-6 text-center">
             <p className="text-gray-400">
               Already have an account?{' '}
-              <Link to="/login" className="text-blue-400 hover:text-blue-300">
+              <Link to="/login" className="text-hermetik-gold hover:text-hermetik-green transition-colors">
                 Sign in
               </Link>
             </p>

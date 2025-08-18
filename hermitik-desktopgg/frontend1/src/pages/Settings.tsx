@@ -120,7 +120,7 @@ const Settings: React.FC = () => {
       <AdminViewBanner />
       
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-white">
+        <h1 className="text-3xl font-bold text-white font-heading">
           {isViewingAsAdmin && viewedUser ? `${viewedUser.name}'s Settings` : 'Settings'}
         </h1>
       </div>
@@ -128,7 +128,7 @@ const Settings: React.FC = () => {
       {/* User Profile */}
       <Card>
         <div className="flex items-center space-x-4 mb-6">
-          <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center">
+          <div className="w-16 h-16 bg-gradient-hermetik rounded-full flex items-center justify-center">
             <User className="w-8 h-8 text-white" />
           </div>
           <div>
@@ -139,7 +139,7 @@ const Settings: React.FC = () => {
               {(isViewingAsAdmin && viewedUser) ? viewedUser.email : user?.email}
             </p>
             {((isViewingAsAdmin && viewedUser) ? viewedUser.role : user?.role) && (
-              <span className="inline-block px-2 py-1 bg-blue-600 text-blue-100 text-xs rounded-full">
+              <span className="inline-block px-2 py-1 bg-hermetik-green text-hermetik-gold text-xs rounded-full border border-hermetik-green/50">
                 {(isViewingAsAdmin && viewedUser) ? viewedUser.role : user?.role}
               </span>
             )}
@@ -177,7 +177,7 @@ const Settings: React.FC = () => {
               id="wallet"
               value={newWallet}
               onChange={(e) => setNewWallet(e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-hermetik-secondary border border-hermetik-green/30 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-hermetik-gold/50 focus:border-hermetik-gold transition-all"
               placeholder="0x..."
               required
             />
@@ -258,7 +258,7 @@ const Settings: React.FC = () => {
             {wallets.map((wallet) => (
               <div key={wallet.id} className="flex items-center justify-between p-4 bg-gray-800 rounded-lg">
                 <div className="flex items-center space-x-3">
-                  <Wallet className="w-6 h-6 text-blue-400" />
+                  <Wallet className="w-6 h-6 text-hermetik-gold" />
                   <div>
                     <p className="font-medium text-white">{wallet.name}</p>
                     <p className="text-sm text-gray-400">{wallet.address}</p>

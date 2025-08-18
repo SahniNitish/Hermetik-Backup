@@ -234,6 +234,13 @@ const realAnalyticsApi = {
     return response.data;
   },
 
+  getPositionAPYs: async (): Promise<any> => {
+    console.log('🔥 API: Fetching position APYs from real backend...');
+    const response = await api.get('/analytics/positions/apy');
+    console.log('🔥 API: APY response received:', response.data);
+    return response.data;
+  },
+
   exportExcel: async (): Promise<Blob> => {
     const response = await api.get('/analytics/export/excel', {
       responseType: 'blob',

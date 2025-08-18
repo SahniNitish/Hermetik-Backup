@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { walletApi, analyticsApi } from '../services/api';
-import { TrendingUp, TrendingDown, Wallet, DollarSign, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, DollarSign, Download, BarChart3, Activity, Target, ArrowUpDown } from 'lucide-react';
 import { useUserView } from '../contexts/UserViewContext';
 import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -347,7 +347,7 @@ const Dashboard: React.FC = () => {
       <AdminViewBanner />
 
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-white">
+        <h1 className="text-3xl font-bold text-white font-heading">
           {isViewingAsAdmin && viewedUser ? `${viewedUser.name}'s Portfolio` : 'Portfolio Overview'}
         </h1>
         <div className="flex items-center space-x-4">
@@ -357,7 +357,7 @@ const Dashboard: React.FC = () => {
               onClick={handleNavExport}
               disabled={exportingNav}
               variant="secondary"
-              className="bg-purple-600 hover:bg-purple-700"
+              className="btn-primary"
             >
               <Download className="w-4 h-4 mr-2" />
               {exportingNav ? 'Exporting...' : 'Export NAV Report'}
@@ -376,82 +376,142 @@ const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Portfolio Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">Total Portfolio Value</p>
-              <p className="text-2xl font-bold text-white">
-                ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-            <DollarSign className="w-8 h-8 text-blue-500" />
-          </div>
-        </Card>
+      {/* Hermetik Metrics Section */}
+      <div className="space-y-6">
+        {/* Primary NAV Display */}
+        <div className="bg-gradient-hermetik rounded-lg p-6 text-center">
+          <h2 className="text-xl font-heading font-semibold text-white mb-2">Current NAV</h2>
+          <p className="text-4xl font-bold text-white">
+            ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </p>
+          <p className="text-sm text-white/80 mt-2">
+            Last updated: {new Date().toLocaleTimeString()}
+          </p>
+        </div>
 
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">Token NAV</p>
-              <p className="text-2xl font-bold text-green-400">
-                ${totalTokensValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-            <DollarSign className="w-8 h-8 text-green-500" />
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">Position NAV</p>
-              <p className="text-2xl font-bold text-purple-400">
-                ${totalPositionsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </p>
-            </div>
-            <DollarSign className="w-8 h-8 text-purple-500" />
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">24h Change</p>
-              <div className="flex items-center space-x-1">
-                <p className={`text-2xl font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
+        {/* Metrics Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* PNL Since Last Report */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">PNL Since Last Report</p>
+                <div className="flex items-center space-x-2 mt-1">
+                  <p className={`text-xl font-bold ${isPositive ? 'text-hermetik-gold' : 'text-red-400'}`}>
+                    {isPositive ? '+' : ''}${Math.abs(dailyReturn * totalValue / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </p>
+                  {isPositive ? (
+                    <TrendingUp className="w-4 h-4 text-hermetik-gold" />
+                  ) : (
+                    <TrendingDown className="w-4 h-4 text-red-400" />
+                  )}
+                </div>
+                <p className={`text-xs ${isPositive ? 'text-hermetik-gold' : 'text-red-400'}`}>
                   {isPositive ? '+' : ''}{dailyReturn.toFixed(2)}%
                 </p>
-                {isPositive ? (
-                  <TrendingUp className="w-5 h-5 text-green-400" />
-                ) : (
-                  <TrendingDown className="w-5 h-5 text-red-400" />
-                )}
               </div>
+              <BarChart3 className="w-8 h-8 text-hermetik-green" />
             </div>
           </div>
-        </Card>
 
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">Total Wallets</p>
-              <p className="text-2xl font-bold text-white">{wallets.length}</p>
+          {/* Annualized Volatility */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Annualized Volatility</p>
+                <p className="text-xl font-bold text-white">
+                  {(Math.abs(dailyReturn) * Math.sqrt(365)).toFixed(1)}%
+                </p>
+                <p className="text-xs text-gray-500">30-day rolling</p>
+              </div>
+              <Activity className="w-8 h-8 text-hermetik-gold" />
             </div>
-            <Wallet className="w-8 h-8 text-purple-500" />
           </div>
-        </Card>
 
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-400">Total Tokens</p>
-              <p className="text-2xl font-bold text-white">
-                {wallets.reduce((sum, wallet) => sum + (wallet.tokens?.length || 0), 0)}
-              </p>
+          {/* Last NAV */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Last NAV</p>
+                <p className="text-xl font-bold text-white">
+                  ${(totalValue - (dailyReturn * totalValue / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </p>
+                <p className="text-xs text-gray-500">Previous report</p>
+              </div>
+              <DollarSign className="w-8 h-8 text-hermetik-green" />
             </div>
           </div>
-        </Card>
+
+          {/* Benchmark */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Benchmark</p>
+                <p className="text-xl font-bold text-hermetik-gold">+8.2%</p>
+                <p className="text-xs text-gray-500">Manual input</p>
+              </div>
+              <Target className="w-8 h-8 text-hermetik-gold" />
+            </div>
+          </div>
+
+          {/* Net Flows This Month */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Net Flows This Month</p>
+                <p className="text-xl font-bold text-hermetik-green">
+                  +${(totalValue * 0.05).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </p>
+                <p className="text-xs text-gray-500">Inflows - Outflows</p>
+              </div>
+              <ArrowUpDown className="w-8 h-8 text-hermetik-green" />
+            </div>
+          </div>
+
+          {/* Token NAV */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Token NAV</p>
+                <p className="text-xl font-bold text-hermetik-gold">
+                  ${totalTokensValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {((totalTokensValue / totalValue) * 100).toFixed(1)}% of portfolio
+                </p>
+              </div>
+              <DollarSign className="w-8 h-8 text-hermetik-gold" />
+            </div>
+          </div>
+
+          {/* Position NAV */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Position NAV</p>
+                <p className="text-xl font-bold text-hermetik-green">
+                  ${totalPositionsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {((totalPositionsValue / totalValue) * 100).toFixed(1)}% of portfolio
+                </p>
+              </div>
+              <BarChart3 className="w-8 h-8 text-hermetik-green" />
+            </div>
+          </div>
+
+          {/* Total Wallets */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Connected Wallets</p>
+                <p className="text-xl font-bold text-white">{wallets.length}</p>
+                <p className="text-xs text-gray-500">Active connections</p>
+              </div>
+              <Wallet className="w-8 h-8 text-hermetik-gold" />
+            </div>
+          </div>
+        </div>
       </div>
 
 

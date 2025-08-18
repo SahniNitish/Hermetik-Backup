@@ -36,22 +36,22 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   ];
 
   return (
-    <div className={`bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-all duration-300 ${isOpen ? 'w-64' : 'w-16'}`}>
+    <div className={`bg-white dark:bg-hermetik-secondary border-r border-gray-200 dark:border-hermetik-green/20 transition-all duration-300 ${isOpen ? 'w-64' : 'w-16'}`}>
       <div className="flex flex-col h-full">
         {/* Header */}
-        <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+        <div className="p-4 border-b border-gray-200 dark:border-hermetik-green/20">
           <div className="flex items-center justify-between">
             {isOpen && (
               <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">H</span>
+                <div className="w-8 h-8 bg-gradient-hermetik rounded-lg flex items-center justify-center">
+                  <span className="text-white font-bold text-sm font-heading">H</span>
                 </div>
-                <span className="text-gray-900 dark:text-white font-semibold">Hermetik</span>
+                <span className="text-gray-900 dark:text-white font-semibold font-heading">Hermetik</span>
               </div>
             )}
             <button
               onClick={onToggle}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-hermetik-green/20 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-hermetik-gold transition-colors"
             >
               {isOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
             </button>
@@ -67,38 +67,38 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
               className={({ isActive }) =>
                 `flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                    ? 'bg-gradient-hermetik text-white shadow-hermetik'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-hermetik-green/20 hover:text-gray-900 dark:hover:text-hermetik-gold'
                 }`
               }
             >
               <item.icon size={20} />
-              {isOpen && <span>{item.label}</span>}
+              {isOpen && <span className="font-medium">{item.label}</span>}
             </NavLink>
           ))}
         </nav>
 
         {/* User Profile */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-800">
+        <div className="p-4 border-t border-gray-200 dark:border-hermetik-green/20">
           {isOpen && user && (
             <div className="mb-3 space-y-2">
               {isViewingAsAdmin && viewedUser && (
-                <div className="p-2 bg-blue-100 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg">
-                  <div className="text-xs font-medium text-blue-800 dark:text-blue-200 mb-1">Viewing as:</div>
-                  <div className="text-sm font-medium text-blue-900 dark:text-blue-100">{viewedUser.name}</div>
+                <div className="p-2 bg-hermetik-gold/10 dark:bg-hermetik-gold/20 border border-hermetik-gold/30 dark:border-hermetik-gold/40 rounded-lg">
+                  <div className="text-xs font-medium text-hermetik-green dark:text-hermetik-gold mb-1">Viewing as:</div>
+                  <div className="text-sm font-medium text-hermetik-green dark:text-white">{viewedUser.name}</div>
                   <button
                     onClick={switchBackToAdmin}
-                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1"
+                    className="text-xs text-hermetik-green dark:text-hermetik-gold hover:underline mt-1"
                   >
                     Switch back
                   </button>
                 </div>
               )}
-              <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg">
+              <div className="p-3 bg-gray-100 dark:bg-hermetik-green/10 rounded-lg border dark:border-hermetik-green/20">
                 <div className="text-sm font-medium text-gray-900 dark:text-white">{user.username}</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
                 {user.role === 'admin' && (
-                  <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">Admin</div>
+                  <div className="text-xs text-hermetik-gold dark:text-hermetik-gold mt-1 font-medium">Admin</div>
                 )}
               </div>
             </div>
@@ -109,7 +109,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           </div>
           <button
             onClick={logout}
-            className="flex items-center space-x-3 w-full px-3 py-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
+            className="flex items-center space-x-3 w-full px-3 py-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-hermetik-green/20 hover:text-gray-900 dark:hover:text-hermetik-gold transition-colors"
           >
             <LogOut size={20} />
             {isOpen && <span>Logout</span>}

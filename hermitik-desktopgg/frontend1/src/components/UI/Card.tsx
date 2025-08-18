@@ -14,7 +14,7 @@ const Card: React.FC<CardProps> = ({ children, className = '', padding = 'md' })
   };
 
   return (
-    <div className={`bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 ${paddingClasses[padding]} ${className}`}>
+    <div className={`card-hermetik ${paddingClasses[padding]} ${className}`}>
       {children}
     </div>
   );

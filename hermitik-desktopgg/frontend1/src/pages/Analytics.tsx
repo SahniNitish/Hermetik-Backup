@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { analyticsApi, walletApi } from '../services/api';
-import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import AdminViewBanner from '../components/Admin/AdminViewBanner';
 import { useUserView } from '../contexts/UserViewContext';
-import { TrendingUp, TrendingDown, BarChart3, PieChart } from 'lucide-react';
+import { TrendingUp, BarChart3, PieChart } from 'lucide-react';
 import {
   PieChart as RechartsPieChart,
   Pie,
@@ -18,15 +17,14 @@ import {
   YAxis,
   CartesianGrid,
   LineChart,
-  Line,
-  Treemap
+  Line
 } from 'recharts';
 
 const Analytics: React.FC = () => {
   const [selectedPeriod, setSelectedPeriod] = useState(30);
 
-  // Color palette for charts
-  const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#84CC16', '#F97316'];
+  // Hermetik color palette for charts
+  const COLORS = ['#00321d', '#B2A534', '#004d2e', '#c9b945', '#006b3a', '#d4c157', '#008147', '#e0cd6a'];
 
   const { viewedUser } = useUserView();
 
@@ -70,15 +68,15 @@ const Analytics: React.FC = () => {
   const totalValue = wallets.reduce((sum, wallet) => sum + (wallet.totalValue || 0), 0);
   const totalTokens = wallets.reduce((sum, wallet) => sum + (wallet.tokens?.length || 0), 0);
 
-  // Calculate chain distribution
-  const chainDistribution: Record<string, number> = {};
-  wallets.forEach(wallet => {
-    if (wallet.chainDistribution) {
-      Object.entries(wallet.chainDistribution).forEach(([chain, value]) => {
-        chainDistribution[chain] = (chainDistribution[chain] || 0) + value;
-      });
-    }
-  });
+  // Calculate chain distribution (for future use)
+  // const chainDistribution: Record<string, number> = {};
+  // wallets.forEach(wallet => {
+  //   if (wallet.chainDistribution) {
+  //     Object.entries(wallet.chainDistribution).forEach(([chain, value]) => {
+  //       chainDistribution[chain] = (chainDistribution[chain] || 0) + value;
+  //     });
+  //   }
+  // });
 
   // Calculate protocol distribution
   const protocolDistribution: Record<string, number> = {};
@@ -90,12 +88,12 @@ const Analytics: React.FC = () => {
     }
   });
 
-  // Prepare data for charts
-  const chainChartData = Object.entries(chainDistribution).map(([name, value]) => ({
-    name: name.charAt(0).toUpperCase() + name.slice(1),
-    value,
-    percentage: ((value / totalValue) * 100).toFixed(1)
-  }));
+  // Prepare data for charts (chain data commented out since we don't use it currently)
+  // const chainChartData = Object.entries(chainDistribution).map(([name, value]) => ({
+  //   name: name.charAt(0).toUpperCase() + name.slice(1),
+  //   value,
+  //   percentage: ((value / totalValue) * 100).toFixed(1)
+  // }));
 
   const protocolChartData = Object.entries(protocolDistribution)
     .sort(([,a], [,b]) => b - a)
@@ -131,7 +129,7 @@ const Analytics: React.FC = () => {
       <AdminViewBanner />
       
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-white">Analytics</h1>
+        <h1 className="text-3xl font-bold text-white font-heading">Analytics</h1>
         
         {/* Period Selector */}
         <div className="flex space-x-2">
@@ -141,8 +139,8 @@ const Analytics: React.FC = () => {
               onClick={() => setSelectedPeriod(period)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 selectedPeriod === period
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  ? 'bg-hermetik-green text-white'
+                  : 'bg-hermetik-secondary text-gray-400 hover:bg-hermetik-green/20'
               }`}
             >
               {period}D
@@ -153,161 +151,207 @@ const Analytics: React.FC = () => {
 
       {/* Portfolio Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
+        <div className="card-hermetik p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-400">Total Tokens</p>
+              <p className="text-sm text-gray-400 font-heading">Total Tokens</p>
               <p className="text-2xl font-bold text-white">{totalTokens}</p>
             </div>
-            <PieChart className="w-8 h-8 text-blue-500" />
+            <PieChart className="w-8 h-8 text-hermetik-gold" />
           </div>
-        </Card>
+        </div>
 
-        <Card>
+        <div className="card-hermetik p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-400">Active Wallets</p>
+              <p className="text-sm text-gray-400 font-heading">Active Wallets</p>
               <p className="text-2xl font-bold text-white">{wallets.length}</p>
             </div>
-            <BarChart3 className="w-8 h-8 text-purple-500" />
+            <BarChart3 className="w-8 h-8 text-hermetik-green" />
           </div>
-        </Card>
-      </div>
-
-      {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Chain Distribution Pie Chart */}
-        <Card>
-          <h2 className="text-xl font-semibold text-white mb-6">Chain Distribution</h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <RechartsPieChart>
-                <Pie
-                  data={chainChartData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percentage }) => `${name}: ${percentage}%`}
-                >
-                  {chainChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'Value']}
-                  labelFormatter={(label) => `Chain: ${label}`}
-                  contentStyle={{
-                    backgroundColor: '#1F2937',
-                    border: '1px solid #374151',
-                    borderRadius: '0.5rem',
-                    color: '#FFFFFF'
-                  }}
-                />
-              </RechartsPieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        {/* Protocol Distribution Pie Chart */}
-        <Card>
-          <h2 className="text-xl font-semibold text-white mb-6">Top Protocols</h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <RechartsPieChart>
-                <Pie
-                  data={protocolChartData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percentage }) => `${name}: ${percentage}%`}
-                >
-                  {protocolChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'Value']}
-                  labelFormatter={(label) => `Protocol: ${label}`}
-                  contentStyle={{
-                    backgroundColor: '#1F2937',
-                    border: '1px solid #374151',
-                    borderRadius: '0.5rem',
-                    color: '#FFFFFF'
-                  }}
-                />
-              </RechartsPieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </div>
-
-      {/* Token Allocation Bar Chart */}
-      <Card>
-        <h2 className="text-xl font-semibold text-white mb-6">Top Token Holdings</h2>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={tokenData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis 
-                dataKey="name" 
-                stroke="#9CA3AF"
-                tick={{ fill: '#9CA3AF' }}
-              />
-              <YAxis 
-                stroke="#9CA3AF"
-                tick={{ fill: '#9CA3AF' }}
-                tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
-              />
-              <Tooltip 
-                formatter={(value: any) => [`$${value.toLocaleString()}`, 'Value']}
-                labelFormatter={(label) => `Token: ${label}`}
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '1px solid #374151',
-                  borderRadius: '0.5rem',
-                  color: '#FFFFFF'
-                }}
-              />
-              <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
         </div>
-      </Card>
+      </div>
 
-      {/* Historical Portfolio Performance */}
-      <Card>
-        <h2 className="text-xl font-semibold text-white mb-6">Portfolio Performance</h2>
+      {/* Analytics Charts - Hermetik Specification */}
+      <div className="space-y-6">
+        {/* APY Breakdown by Position with Timeframe */}
+        <div className="card-hermetik p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-white font-heading">APY Breakdown by Position</h2>
+            <div className="flex space-x-2">
+              {['1D', '7D', '30D'].map((timeframe) => (
+                <button
+                  key={timeframe}
+                  className="px-3 py-1 rounded text-xs font-medium bg-hermetik-green/20 text-hermetik-gold hover:bg-hermetik-green/30 transition-colors"
+                >
+                  {timeframe}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={protocolPerformanceData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
+                <XAxis 
+                  dataKey="name" 
+                  stroke="#B2A534"
+                  tick={{ fill: '#B2A534', fontSize: 12 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={80}
+                />
+                <YAxis 
+                  stroke="#B2A534"
+                  tick={{ fill: '#B2A534' }}
+                  tickFormatter={(value) => `${value.toFixed(1)}%`}
+                />
+                <Tooltip 
+                  formatter={(value: any) => [`${value.toFixed(2)}%`, 'APY']}
+                  labelFormatter={(label) => `Position: ${label}`}
+                  contentStyle={{
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #00321d',
+                    borderRadius: '0.5rem',
+                    color: '#FFFFFF'
+                  }}
+                />
+                <Bar 
+                  dataKey="apy" 
+                  fill="#00321d" 
+                  radius={[4, 4, 0, 0]}
+                  stroke="#B2A534"
+                  strokeWidth={1}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Allocation Pie Chart for Positions/Rewards */}
+        <div className="card-hermetik p-6">
+          <h2 className="text-xl font-semibold text-white font-heading mb-6">Portfolio Allocation</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Position Allocation */}
+            <div>
+              <h3 className="text-lg font-medium text-hermetik-gold mb-4 font-heading">By Position</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsPieChart>
+                    <Pie
+                      data={protocolChartData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                      label={({ name, percentage }) => `${percentage}%`}
+                    >
+                      {protocolChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value: any) => [`$${value.toLocaleString()}`, 'Value']}
+                      labelFormatter={(label) => `Position: ${label}`}
+                      contentStyle={{
+                        backgroundColor: '#1a1a1a',
+                        border: '1px solid #00321d',
+                        borderRadius: '0.5rem',
+                        color: '#FFFFFF'
+                      }}
+                    />
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Token Allocation */}
+            <div>
+              <h3 className="text-lg font-medium text-hermetik-gold mb-4 font-heading">By Token</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsPieChart>
+                    <Pie
+                      data={tokenData.slice(0, 8)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                      label={({ name, percentage }) => `${percentage}%`}
+                    >
+                      {tokenData.slice(0, 8).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value: any) => [`$${value.toLocaleString()}`, 'Value']}
+                      labelFormatter={(label) => `Token: ${label}`}
+                      contentStyle={{
+                        backgroundColor: '#1a1a1a',
+                        border: '1px solid #00321d',
+                        borderRadius: '0.5rem',
+                        color: '#FFFFFF'
+                      }}
+                    />
+                  </RechartsPieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Performance: NAV Over Time */}
+      <div className="card-hermetik p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold text-white font-heading">Performance: NAV Over Time</h2>
+          <div className="flex space-x-2">
+            {[7, 30, 90].map((period) => (
+              <button
+                key={period}
+                onClick={() => setSelectedPeriod(period)}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  selectedPeriod === period
+                    ? 'bg-hermetik-green text-white'
+                    : 'bg-hermetik-green/20 text-hermetik-gold hover:bg-hermetik-green/30'
+                }`}
+              >
+                {period}D
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="h-80">
           {historyLoading ? (
             <div className="flex items-center justify-center h-full">
               <LoadingSpinner size="md" />
-              <p className="text-gray-400 ml-2">Loading history...</p>
+              <p className="text-gray-400 ml-2">Loading NAV history...</p>
             </div>
           ) : historyData && historyData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={historyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
                 <XAxis 
                   dataKey="date"
-                  stroke="#9CA3AF"
-                  tick={{ fill: '#9CA3AF' }}
+                  stroke="#B2A534"
+                  tick={{ fill: '#B2A534' }}
                   tickFormatter={(value) => new Date(value).toLocaleDateString()}
                 />
                 <YAxis 
-                  stroke="#9CA3AF"
-                  tick={{ fill: '#9CA3AF' }}
+                  stroke="#B2A534"
+                  tick={{ fill: '#B2A534' }}
                   tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
                 />
                 <Tooltip 
-                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'Portfolio Value']}
+                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'NAV']}
                   labelFormatter={(label) => `Date: ${new Date(label).toLocaleDateString()}`}
                   contentStyle={{
-                    backgroundColor: '#1F2937',
-                    border: '1px solid #374151',
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #00321d',
                     borderRadius: '0.5rem',
                     color: '#FFFFFF'
                   }}
@@ -315,120 +359,26 @@ const Analytics: React.FC = () => {
                 <Line 
                   type="monotone" 
                   dataKey="value" 
-                  stroke="#10B981" 
-                  strokeWidth={2}
-                  dot={{ fill: '#10B981', strokeWidth: 2, r: 4 }}
-                  activeDot={{ r: 6, stroke: '#10B981', strokeWidth: 2 }}
+                  stroke="#B2A534" 
+                  strokeWidth={3}
+                  dot={{ fill: '#00321d', strokeWidth: 2, r: 4 }}
+                  activeDot={{ r: 6, stroke: '#B2A534', strokeWidth: 2, fill: '#00321d' }}
                 />
               </LineChart>
             </ResponsiveContainer>
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                <TrendingUp className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400">No historical data available</p>
+                <TrendingUp className="w-16 h-16 text-hermetik-gold mx-auto mb-4" />
+                <p className="text-gray-400">No NAV history available</p>
+                <p className="text-sm text-gray-500 mt-2">NAV performance chart will appear here once historical data is collected</p>
               </div>
             </div>
           )}
         </div>
-      </Card>
+      </div>
 
-      {/* Protocol Performance Comparison */}
-      <Card>
-        <h2 className="text-xl font-semibold text-white mb-6">Protocol APY Performance</h2>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={protocolPerformanceData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis 
-                dataKey="name" 
-                stroke="#9CA3AF"
-                tick={{ fill: '#9CA3AF', fontSize: 12 }}
-                angle={-45}
-                textAnchor="end"
-                height={80}
-              />
-              <YAxis 
-                stroke="#9CA3AF"
-                tick={{ fill: '#9CA3AF' }}
-                tickFormatter={(value) => `${value.toFixed(1)}%`}
-              />
-              <Tooltip 
-                formatter={(value: any, name: string) => {
-                  if (name === 'apy') return [`${value.toFixed(2)}%`, 'Daily APY'];
-                  return [`$${value.toLocaleString()}`, 'Value'];
-                }}
-                labelFormatter={(label) => `Protocol: ${label}`}
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '1px solid #374151',
-                  borderRadius: '0.5rem',
-                  color: '#FFFFFF'
-                }}
-              />
-              <Bar dataKey="apy" fill="#10B981" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
 
-      {/* Token Allocation Treemap */}
-      <Card>
-        <h2 className="text-xl font-semibold text-white mb-6">Token Allocation Breakdown</h2>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <Treemap
-              data={tokenData}
-              dataKey="size"
-              nameKey="name"
-              fill="#3B82F6"
-              stroke="#1F2937"
-              strokeWidth={2}
-            >
-              <Tooltip 
-                formatter={(value: any) => [`$${value.toLocaleString()}`, 'Value']}
-                labelFormatter={(label, payload) => {
-                  const item = payload?.[0]?.payload;
-                  return `${label} (${item?.percentage}%)`;
-                }}
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '1px solid #374151',
-                  borderRadius: '0.5rem',
-                  color: '#FFFFFF'
-                }}
-              />
-            </Treemap>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-
-      {/* Wallet Performance */}
-      <Card>
-        <h2 className="text-xl font-semibold text-white mb-6">Wallet Performance</h2>
-        <div className="space-y-4">
-          {wallets.map((wallet) => (
-            <div
-              key={wallet.id}
-              className="flex items-center justify-between p-4 bg-gray-800 rounded-lg"
-            >
-              <div>
-                <p className="font-medium text-white">{wallet.name}</p>
-                <p className="text-sm text-gray-400">{wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}</p>
-              </div>
-              <div className="text-right">
-                <p className="font-semibold text-white">
-                  ${wallet.totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </p>
-                <div className="flex items-center space-x-1">
-                  <TrendingUp className="w-4 h-4 text-green-400" />
-                  <p className="text-sm text-green-400">+2.3%</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
 
     </div>
   );

@@ -25,21 +25,37 @@ const Positions: React.FC = () => {
   });
 
   // Fetch position APY data for the APY display component
-  const { data: positionAPYs } = useQuery({
+  const { data: positionAPYs, isLoading: apyLoading, error: apyError } = useQuery({
     queryKey: ['positionAPYs', viewedUser?.id],
     queryFn: async () => {
+      console.log('🔥 FRONTEND: Starting APY fetch...');
+      console.log('🔥 API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
+      console.log('🔥 Access token:', localStorage.getItem('access_token') ? 'EXISTS' : 'MISSING');
+      console.log('🔥 Wallets available:', !!wallets, 'Count:', wallets?.length || 0);
+      
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy`, {
+        const url = `${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy`;
+        console.log('🔥 FRONTEND: Fetching from URL:', url);
+        
+        const response = await fetch(url, {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json'
           }
         });
         
+        console.log('🔥 FRONTEND: Response status:', response.status);
+        console.log('🔥 FRONTEND: Response headers:', [...response.headers.entries()]);
+        
         if (!response.ok) {
-          throw new Error(`Failed to fetch position APYs: ${response.status}`);
+          const errorText = await response.text();
+          console.error('🔥 FRONTEND: Error response body:', errorText);
+          throw new Error(`Failed to fetch position APYs: ${response.status} - ${errorText}`);
         }
         
         const data = await response.json();
+        console.log('🔥 FRONTEND: APY data received:', data);
+        console.log('🔥 FRONTEND: APY data structure:', JSON.stringify(data, null, 2));
         return data;
       } catch (error) {
         console.error('❌ Position APYs error:', error);
@@ -49,6 +65,15 @@ const Positions: React.FC = () => {
     enabled: !!localStorage.getItem('access_token') && !!wallets,
     refetchInterval: 300000, // Refresh every 5 minutes
     staleTime: 240000 // Consider data stale after 4 minutes
+  });
+
+  // Debug APY query status
+  console.log('🔥 FRONTEND: APY Query Status:', {
+    apyLoading,
+    apyError: apyError?.message,
+    positionAPYs: positionAPYs ? 'HAS_DATA' : 'NO_DATA',
+    wallets: wallets?.length || 0,
+    hasToken: !!localStorage.getItem('access_token')
   });
 
   if (isLoading) {
@@ -144,99 +169,214 @@ const Positions: React.FC = () => {
 
 
 
-  // Generate position IDs for APY lookup using Debank position IDs
-  const generatePositionId = (protocolName: string, positionName: string, walletAddress: string, debankPositionId?: string): string => {
-    // Use Debank position ID if available, otherwise fall back to constructed ID
-    return debankPositionId || `${protocolName}_${positionName}_${walletAddress}`.toLowerCase().replace(/\s+/g, '_');
+  // Generate position IDs for APY lookup - match backend format
+  const generatePositionId = (protocolName: string, chain: string): string => {
+    // Match the backend APY service format: protocol_chain_id
+    const protocol = protocolName.toLowerCase().replace(/\s+/g, '_');
+    const chainName = chain.toLowerCase();
+    return `${protocol}_${chainName}_${protocol}`;
   };
 
   // Create APY lookup map
   const apyLookup = new Map();
   if (positionAPYs?.success && positionAPYs.positions) {
+    console.log('🔥 FRONTEND: Creating APY lookup map...');
+    console.log('🔥 FRONTEND: Available APY position IDs:', Object.keys(positionAPYs.positions));
     Object.entries(positionAPYs.positions).forEach(([positionId, apyData]) => {
+      console.log(`🔥 FRONTEND: Adding to lookup: ${positionId}`, apyData);
       apyLookup.set(positionId, apyData);
+    });
+    console.log('🔥 FRONTEND: APY lookup map size:', apyLookup.size);
+  } else {
+    console.log('🔥 FRONTEND: No APY data available for lookup:', {
+      hasPositionAPYs: !!positionAPYs,
+      success: positionAPYs?.success,
+      hasPositions: !!positionAPYs?.positions
     });
   }
 
-  // Helper component to display APY data
-  const APYDisplay = ({ protocolName, positionName, walletAddress }: { 
+  // Enhanced APY color coding logic based on comprehensive guide
+  const getAPYColor = (apy: number | null, confidence: string = 'medium') => {
+    if (apy === null || apy === undefined) return 'text-gray-500';
+    
+    // Confidence-based color intensity
+    const confidenceModifier = confidence === 'high' ? '' : confidence === 'medium' ? '-400' : '-500';
+    
+    if (apy >= 15) return `text-green-300${confidenceModifier}`; // Excellent (15%+)
+    if (apy >= 10) return `text-green-400${confidenceModifier}`; // Very Good (10-15%)
+    if (apy >= 5) return `text-green-500${confidenceModifier}`;  // Good (5-10%)
+    if (apy >= 1) return `text-blue-400${confidenceModifier}`;   // Moderate (1-5%)
+    if (apy >= 0) return `text-yellow-400${confidenceModifier}`; // Break-even (0-1%)
+    if (apy >= -5) return `text-orange-400${confidenceModifier}`; // Small Loss (0 to -5%)
+    return `text-red-400${confidenceModifier}`;                   // Significant Loss (-5%+)
+  };
+
+  // Enhanced APY formatting logic
+  const formatAPY = (apy: number | null, isNewPosition: boolean = false) => {
+    if (apy === null || apy === undefined) return 'Calculating...';
+    
+    const prefix = apy >= 0 ? '+' : '';
+    const formattedValue = `${prefix}${apy.toFixed(2)}%`;
+    
+    if (isNewPosition) {
+      return `${formattedValue} (Est.)`;
+    }
+    
+    return formattedValue;
+  };
+
+  // Get confidence badge color and text with Hermetik colors
+  const getConfidenceBadge = (confidence: string = 'medium') => {
+    switch (confidence) {
+      case 'high':
+        return { color: 'bg-hermetik-green/30 text-hermetik-gold border border-hermetik-green/50', text: 'HIGH' };
+      case 'medium':
+        return { color: 'bg-hermetik-gold/30 text-hermetik-green border border-hermetik-gold/50', text: 'MED' };
+      case 'low':
+        return { color: 'bg-red-900/30 text-red-400 border border-red-500/50', text: 'LOW' };
+      case 'very_low':
+        return { color: 'bg-red-800/30 text-red-300 border border-red-400/50', text: 'V.LOW' };
+      default:
+        return { color: 'bg-gray-900/30 text-gray-400 border border-gray-500/50', text: 'UNK' };
+    }
+  };
+
+  // Helper component to display APY data in a separate dedicated box
+  const APYDisplay = ({ protocolName, chain }: { 
     protocolName: string, 
-    positionName: string, 
-    walletAddress: string
+    chain: string
   }) => {
-    const positionId = generatePositionId(protocolName, positionName, walletAddress);
+    const positionId = generatePositionId(protocolName, chain);
     const apyData = apyLookup.get(positionId);
+    
+    console.log(`🔥 APY LOOKUP: ${protocolName} > ${chain}`, {
+      protocolName,
+      chain,
+      generatedId: positionId,
+      foundData: !!apyData,
+      availableKeys: Array.from(apyLookup.keys())
+    });
 
     if (!apyData) {
       return (
-        <div className="text-xs text-gray-500 mt-1">
-          APY: No data available
+        <div className="bg-hermetik-secondary/50 border border-hermetik-green/20 rounded-lg p-4 mt-4">
+          <div className="flex items-center justify-center text-gray-400">
+            <BarChart3 className="w-4 h-4 mr-2 text-hermetik-gold/60" />
+            <span className="text-sm font-heading">APY data not available</span>
+          </div>
         </div>
       );
     }
 
-    const periods = [
-      { key: 'daily', label: '1D' },
-      { key: 'weekly', label: '7D' },
-      { key: 'monthly', label: '30D' }
-    ];
-
-    const hasAnyData = periods.some(period => 
-      apyData[period.key] && apyData[period.key].rawAPY !== null
-    );
-
-    if (!hasAnyData) {
-      return (
-        <div className="text-xs text-gray-500 mt-1">
-          APY: Calculating... (new position)
-        </div>
-      );
-    }
+    // New backend returns flat structure with single APY value
+    const confidence = apyData.confidence || 'medium';
+    const isNewPosition = apyData.isNewPosition || false;
+    const apy = apyData.apy;
+    const days = apyData.days || 1;
 
     return (
-      <div className="mt-2 space-y-1">
-        <div className="flex items-center text-xs text-gray-400">
-          <BarChart3 className="w-3 h-3 mr-1" />
-          <span>APY Performance:</span>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          {periods.map(period => {
-            const periodData = apyData[period.key];
-            const hasData = periodData && periodData.rawAPY !== null;
-            const isPositive = hasData ? periodData.rawAPY >= 0 : null;
-            const isNewPosition = periodData?.isNewPosition || false;
-            
-            return (
-              <div key={period.key} className="text-xs">
-                <span className="text-gray-500">{period.label}: </span>
-                {hasData ? (
-                  <div className="flex items-center">
-                    <span className={`font-medium ${
-                      isPositive ? 'text-green-400' : 'text-red-400'
-                    }`}>
-                      {periodData.apy}
-                      {isPositive ? (
-                        <TrendingUp className="w-3 h-3 inline ml-1" />
-                      ) : (
-                        <TrendingDown className="w-3 h-3 inline ml-1" />
-                      )}
-                    </span>
-                    {isNewPosition && period.key === 'daily' && (
-                      <span className="text-blue-400 text-xs ml-1" title="Based on unclaimed rewards">*</span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-gray-500">No data</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        {apyData.daily?.isNewPosition && (
-          <div className="text-xs text-blue-400 mt-1">
-            * New position APY based on unclaimed rewards
+      <div className="bg-gradient-hermetik-subtle border border-hermetik-green/30 rounded-lg p-4 mt-4 card-hermetik">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center">
+            <BarChart3 className="w-5 h-5 mr-2 text-hermetik-gold" />
+            <h4 className="text-sm font-semibold text-white font-heading">APY Analysis</h4>
           </div>
-        )}
+          <div className="flex items-center space-x-2">
+            <span className={`px-2 py-1 rounded text-xs font-medium ${getConfidenceBadge(confidence).color}`}>
+              {getConfidenceBadge(confidence).text}
+            </span>
+            {isNewPosition && (
+              <span className="bg-hermetik-green/30 text-hermetik-gold px-2 py-1 rounded text-xs font-medium" title="Based on unclaimed rewards">
+                NEW
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Main APY Display */}
+        <div className="text-center mb-4">
+          <div className="flex items-center justify-center space-x-2">
+            <span className={`text-3xl font-bold ${getAPYColor(apy, confidence)}`}>
+              {formatAPY(apy, isNewPosition)}
+            </span>
+            {apy !== null && (
+              apy >= 0 ? (
+                <TrendingUp className={`w-6 h-6 ${getAPYColor(apy, confidence)}`} />
+              ) : (
+                <TrendingDown className={`w-6 h-6 ${getAPYColor(apy, confidence)}`} />
+              )
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">
+            {days} day{days !== 1 ? 's' : ''} {apyData.calculationMethod?.includes('new_position') ? 'estimate' : 'average'}
+          </p>
+        </div>
+
+        {/* Financial Breakdown */}
+        <div className="bg-gray-800/50 rounded-lg p-3 space-y-2">
+          <h5 className="text-xs font-medium text-gray-300 mb-2">Financial Breakdown</h5>
+          
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-400">Position Value:</span>
+              <span className="text-white font-medium">
+                {apyData.formattedValue || `$${apyData.currentValue?.toLocaleString()}`}
+              </span>
+            </div>
+            
+            {isNewPosition && apyData.unclaimedRewards && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Unclaimed Rewards:</span>
+                <span className="text-green-400 font-medium">
+                  ${apyData.unclaimedRewards.toLocaleString()}
+                </span>
+              </div>
+            )}
+            
+            {!isNewPosition && apyData.valueChange !== undefined && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Value Change:</span>
+                <span className={`font-medium ${apyData.valueChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {apyData.valueChange >= 0 ? '+' : ''}${apyData.valueChange.toLocaleString()}
+                </span>
+              </div>
+            )}
+            
+            {!isNewPosition && apyData.yesterdayValue && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Previous Value:</span>
+                <span className="text-gray-300">
+                  ${apyData.yesterdayValue.toLocaleString()}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Calculation Details */}
+        <div className="mt-3 pt-3 border-t border-gray-600">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-gray-400">
+              Method: {apyData.calculationMethod?.replace(/_/g, ' ') || 'Standard calculation'}
+            </span>
+            <span className="text-gray-500">
+              Confidence: {confidence.toUpperCase()}
+            </span>
+          </div>
+          
+          {isNewPosition && (
+            <p className="text-xs text-blue-400 mt-2 italic">
+              * Estimated from current rewards (1-day assumption)
+            </p>
+          )}
+          
+          {apyData.notes && (
+            <p className="text-xs text-gray-500 mt-1">
+              {apyData.notes}
+            </p>
+          )}
+        </div>
       </div>
     );
   };
@@ -264,8 +404,8 @@ const Positions: React.FC = () => {
       <AdminViewBanner />
       
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">DeFi Positions</h1>
-        <p className="text-gray-600 dark:text-gray-400">Your current DeFi positions across all protocols</p>
+        <h1 className="text-3xl font-bold text-white mb-2 font-heading">DeFi Positions</h1>
+        <p className="text-gray-400">Your current DeFi positions across all protocols</p>
       </div>
 
       {/* Protocol Positions Display */}
@@ -316,12 +456,7 @@ const Positions: React.FC = () => {
                             <p className="text-xl font-bold text-white">
                               ${totalPositionValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                             </p>
-                            {/* APY Display for Position */}
-                            <APYDisplay 
-                              protocolName={protocol.name}
-                              positionName={position.position_name}
-                              walletAddress={protocol.sourceWallet || 'unknown'}
-                            />
+                            <p className="text-sm text-gray-400">Total Value</p>
                           </div>
                         </div>
 
@@ -387,6 +522,12 @@ const Positions: React.FC = () => {
                             </div>
                           </div>
                         )}
+
+                        {/* APY Analysis Section */}
+                        <APYDisplay 
+                          protocolName={protocol.name}
+                          chain={position.chain || protocol.chain}
+                        />
                       </div>
                     );
                   })}
