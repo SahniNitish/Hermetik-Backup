@@ -3,6 +3,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WalletData = require('../models/WalletData');
+const DailySnapshot = require('../models/DailySnapshot');
 const {
   fetchTokens,
   fetchAllProtocols,
@@ -80,6 +81,110 @@ function deduplicateProtocolsById(protocols) {
     seen.add(p.id);
     return true;
   });
+}
+
+// Function to create DailySnapshot from wallet data
+async function createDailySnapshot(userId, walletAddress, walletResult) {
+  try {
+    console.log(`📸 SNAPSHOT FUNCTION CALLED - Creating daily snapshot for wallet ${walletAddress}`);
+    console.log(`📸 SNAPSHOT FUNCTION - User ID: ${userId}`);
+    console.log(`📸 SNAPSHOT FUNCTION - Wallet result keys:`, Object.keys(walletResult));
+    
+    // Check if we already have a snapshot for today
+    const today = new Date();
+    const startOfDay = new Date(today);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    console.log(`📸 SNAPSHOT FUNCTION - Checking for existing snapshots between ${startOfDay} and ${endOfDay}`);
+    
+    const existingSnapshot = await DailySnapshot.findOne({
+      userId,
+      walletAddress,
+      date: { $gte: startOfDay, $lte: endOfDay }
+    });
+    
+    if (existingSnapshot) {
+      console.log(`📸 Snapshot already exists for today for wallet ${walletAddress}, updating...`);
+      // Update existing snapshot
+      existingSnapshot.totalNavUsd = walletResult.summary.total_usd_value;
+      existingSnapshot.tokensNavUsd = walletResult.summary.token_usd_value;
+      existingSnapshot.positionsNavUsd = walletResult.summary.protocol_usd_value;
+      existingSnapshot.tokens = walletResult.tokens.map(token => ({
+        symbol: token.symbol,
+        name: token.name,
+        chain: token.chain,
+        amount: token.amount,
+        price: token.price,
+        usdValue: token.usd_value,
+        logoUrl: token.logo_url
+      }));
+      existingSnapshot.positions = createPositionsFromProtocols(walletResult.protocols);
+      await existingSnapshot.save();
+      console.log(`📸 Updated snapshot for wallet ${walletAddress}`);
+      return existingSnapshot;
+    }
+    
+    // Create new snapshot
+    const snapshot = new DailySnapshot({
+      userId,
+      walletAddress,
+      date: today,
+      totalNavUsd: walletResult.summary.total_usd_value,
+      tokensNavUsd: walletResult.summary.token_usd_value,
+      positionsNavUsd: walletResult.summary.protocol_usd_value,
+      tokens: walletResult.tokens.map(token => ({
+        symbol: token.symbol,
+        name: token.name,
+        chain: token.chain,
+        amount: token.amount,
+        price: token.price,
+        usdValue: token.usd_value,
+        logoUrl: token.logo_url
+      })),
+      positions: createPositionsFromProtocols(walletResult.protocols)
+    });
+    
+    await snapshot.save();
+    console.log(`📸 Created new snapshot for wallet ${walletAddress}`);
+    return snapshot;
+  } catch (error) {
+    console.error(`❌ Error creating snapshot for wallet ${walletAddress}:`, error);
+    return null;
+  }
+}
+
+// Helper function to convert protocol data to position format expected by APY service
+function createPositionsFromProtocols(protocols) {
+  const positions = [];
+  
+  protocols.forEach(protocol => {
+    protocol.positions.forEach(position => {
+      positions.push({
+        protocolId: protocol.protocol_id,
+        protocolName: protocol.name,
+        chain: protocol.chain,
+        supplyTokens: position.tokens.map(token => ({
+          symbol: token.symbol,
+          amount: token.amount,
+          price: token.price,
+          usdValue: token.usd_value
+        })),
+        rewardTokens: position.rewards.map(reward => ({
+          symbol: reward.symbol,
+          amount: reward.amount,
+          price: reward.price,
+          usdValue: reward.usd_value
+        })),
+        totalUsdValue: position.tokens.reduce((sum, token) => sum + token.usd_value, 0) +
+                       position.rewards.reduce((sum, reward) => sum + reward.usd_value, 0)
+      });
+    });
+  });
+  
+  console.log(`📸 Created ${positions.length} positions from ${protocols.length} protocols`);
+  return positions;
 }
 
 // Main enhanced wallet route
@@ -436,6 +541,34 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
       // Continue with response even if save fails
     }
     
+    console.log(`🔄 CHECKPOINT - About to start snapshot creation process...`);
+    console.log(`🔄 CHECKPOINT - Target User ID: ${targetUserId}`);
+    console.log(`🔄 CHECKPOINT - Results count: ${results.length}`);
+    
+    // Create daily snapshots for APY calculations
+    console.log(`📸 MAIN ROUTE - About to create daily snapshots for ${results.length} wallets...`);
+    console.log(`📸 MAIN ROUTE - Target User ID: ${targetUserId}`);
+    console.log(`📸 MAIN ROUTE - Results length: ${results.length}`);
+    
+    try {
+      for (const walletResult of results) {
+        console.log(`📸 MAIN ROUTE - Processing snapshot for wallet ${walletResult.address}...`);
+        console.log(`📸 MAIN ROUTE - Wallet result summary:`, {
+          address: walletResult.address,
+          tokensCount: walletResult.tokens?.length,
+          protocolsCount: walletResult.protocols?.length,
+          summaryValue: walletResult.summary?.total_usd_value
+        });
+        await createDailySnapshot(targetUserId, walletResult.address, walletResult);
+        console.log(`📸 MAIN ROUTE - Finished processing snapshot for wallet ${walletResult.address}`);
+      }
+      console.log(`✅ MAIN ROUTE - Daily snapshots created successfully for all ${results.length} wallets`);
+    } catch (snapshotErr) {
+      console.error('❌ MAIN ROUTE - Error creating daily snapshots:', snapshotErr.message);
+      console.error('❌ MAIN ROUTE - Snapshot error details:', snapshotErr);
+      // Continue with response even if snapshot creation fails
+    }
+    
     res.json({ 
       portfolios: results,
       overall_summary: overallSummary,
@@ -512,7 +645,38 @@ router.get('/wallet/:address', auth, requireUser, async (req, res) => {
         name: protocol.name,
         chain: protocol.chain_id,
         net_usd_value: protocol.net_usd_value || 0,
-        logo_url: protocol.logo_url
+        logo_url: protocol.logo_url,
+        positions: (protocol.portfolio_item_list || []).map(item => ({
+          position_name: item.name,
+          position_id: item.detail?.portfolio_item_id || item.pool?.id,
+          chain: protocol.chain_id,
+          tokens: (item.detail?.supply_token_list || []).map(t => ({
+            symbol: t.symbol,
+            name: t.name,
+            amount: t.amount || 0,
+            price: t.price || 0,
+            usd_value: (t.amount || 0) * (t.price || 0),
+            chain: protocol.chain_id,
+            logo_url: t.logo_url,
+            decimals: t.decimals
+          })),
+          rewards: (item.detail?.reward_token_list || []).map(t => ({
+            symbol: t.symbol,
+            name: t.name,
+            amount: t.amount || 0,
+            price: t.price || 0,
+            usd_value: (t.amount || 0) * (t.price || 0),
+            chain: protocol.chain_id,
+            logo_url: t.logo_url,
+            decimals: t.decimals
+          })),
+          pool_id: item.pool?.id,
+          pool_name: item.pool?.name,
+          description: item.detail?.description,
+          stats: item.stats,
+          health_rate: item.health_rate,
+          proxy_detail: item.proxy_detail
+        }))
       }));
     
     const summary = calculatePortfolioSummary(enrichedTokens, enrichedProtocols);
@@ -531,6 +695,21 @@ router.get('/wallet/:address', auth, requireUser, async (req, res) => {
     } catch (saveErr) {
       console.error('❌ Error saving single wallet data:', saveErr.message);
       // Continue with response even if save fails
+    }
+    
+    // Create daily snapshot for this wallet
+    try {
+      const walletResult = {
+        address,
+        tokens: enrichedTokens,
+        protocols: enrichedProtocols,
+        summary
+      };
+      await createDailySnapshot(targetUserId, address, walletResult);
+      console.log(`📸 Created snapshot for single wallet ${address}`);
+    } catch (snapshotErr) {
+      console.error('❌ Error creating snapshot for single wallet:', snapshotErr.message);
+      // Continue with response even if snapshot creation fails
     }
     
     res.json({ 
@@ -576,6 +755,39 @@ router.get('/wallet/:address/protocol/:protocolId/:chainId', auth, async (req, r
   } catch (err) {
     console.error(`❌ Error fetching protocol details:`, err.response?.data || err.message);
     res.status(500).json({ error: 'Failed to fetch protocol details', details: err.message });
+  }
+});
+
+// Debug endpoint to check recent snapshots
+router.get('/debug/snapshots', auth, async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const targetUserId = userId || req.user._id;
+    
+    console.log(`🔍 Checking recent snapshots for user: ${targetUserId}`);
+    
+    const snapshots = await DailySnapshot.find({ userId: targetUserId })
+      .sort({ date: -1 })
+      .limit(5);
+    
+    const snapshotSummary = snapshots.map(s => ({
+      date: s.date,
+      walletAddress: s.walletAddress,
+      totalNavUsd: s.totalNavUsd,
+      positionCount: s.positions?.length || 0,
+      hasRewardTokens: s.positions?.some(p => p.rewardTokens?.length > 0) || false,
+      createdAt: s.createdAt
+    }));
+    
+    res.json({
+      userId: targetUserId,
+      snapshotCount: snapshots.length,
+      snapshots: snapshotSummary,
+      message: `Found ${snapshots.length} recent snapshots`
+    });
+  } catch (error) {
+    console.error('❌ Error checking snapshots:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
