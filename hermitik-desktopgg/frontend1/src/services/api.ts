@@ -48,13 +48,15 @@ const realAuthApi = {
     console.log('API: Raw login response:', response.data);
     
     // Transform backend response to match frontend expectations
+    // Handle new standardized API response format
+    const apiData = response.data.success ? response.data.data : response.data;
     const transformed = {
-      access_token: response.data.token,
+      access_token: apiData.token,
       user: {
-        id: response.data.user.id,
-        username: response.data.user.name,
-        email: response.data.user.email,
-        role: response.data.user.role
+        id: apiData.user.id,
+        username: apiData.user.name,
+        email: apiData.user.email,
+        role: apiData.user.role
       }
     };
     console.log('API: Transformed login response:', transformed);
@@ -74,11 +76,14 @@ const realAuthApi = {
     console.log('API: Raw profile response:', response.data);
     
     // Transform backend response to match frontend expectations
+    // Handle new standardized API response format
+    const apiData = response.data.success ? response.data.data : response.data;
+    const user = apiData.user || apiData;
     const transformed = {
-      id: response.data.user._id || response.data.user.id,
-      username: response.data.user.name,
-      email: response.data.user.email,
-      role: response.data.user.role
+      id: user._id || user.id,
+      username: user.name,
+      email: user.email,
+      role: user.role
     };
     console.log('API: Transformed profile response:', transformed);
     return transformed;
@@ -148,7 +153,9 @@ const realWalletApi = {
       }
       
       // Transform backend response to match frontend expectations
-      const portfolios = response.data.portfolios || [];
+      // Handle new standardized API response format
+      const apiData = response.data.success ? response.data.data : response.data;
+      const portfolios = apiData.portfolios || [];
       const wallets = portfolios.map((portfolio: any) => ({
         id: portfolio.address,
         address: portfolio.address,
@@ -188,7 +195,9 @@ const realWalletApi = {
       console.log('Raw user wallet response:', response.data);
       
       // Transform backend response to match frontend expectations
-      const portfolios = response.data.portfolios || [];
+      // Handle new standardized API response format
+      const apiData = response.data.success ? response.data.data : response.data;
+      const portfolios = apiData.portfolios || [];
       const wallets = portfolios.map((portfolio: any) => ({
         id: portfolio.address,
         address: portfolio.address,
@@ -293,7 +302,20 @@ const realAnalyticsApi = {
 const realAdminApi = {
   collectData: async (): Promise<{ message: string; status: string }> => {
     const response = await api.post('/admin/collect-data');
-    return response.data;
+    // Handle new standardized API response format
+    const apiData = response.data.success ? response.data.data : response.data;
+    return {
+      message: response.data.message || 'Snapshots collected successfully',
+      status: 'success',
+      ...apiData
+    };
+  },
+
+  getCollectionStatus: async (): Promise<{ running: boolean; status: string }> => {
+    const response = await api.get('/admin/collect-data/status');
+    // Handle new standardized API response format
+    const apiData = response.data.success ? response.data.data : response.data;
+    return apiData;
   },
 };
 

@@ -30,14 +30,39 @@ const Dashboard: React.FC = () => {
     refetchInterval: 30000,
   });
 
+  // Fetch APY data for dashboard (uses shared API client so tokens/mocks are handled)
+  const { data: positionAPYs, isLoading: apyLoading, error: apyError } = useQuery({
+    queryKey: ['positionAPYs', viewedUser?.id],
+    queryFn: async () => {
+      try {
+        const data = await analyticsApi.getPositionAPYs();
+        console.log('🔥 DASHBOARD: APY data received:', data);
+        return data;
+      } catch (error) {
+        console.error('❌ Dashboard APYs error:', error);
+        return null;
+      }
+    },
+    enabled: !!wallets && (!!localStorage.getItem('access_token') || !!localStorage.getItem('mock_access_token') || import.meta.env.VITE_USE_MOCK_API !== 'false'),
+    refetchInterval: 300000,
+    staleTime: 240000
+  });
 
   console.log('Dashboard: Query state:', { wallets, isLoading, error: queryError });
+  console.log('Dashboard: APY state:', { positionAPYs, apyLoading, apyError });
+  console.log('🔥 DASHBOARD: Full APY object:', JSON.stringify(positionAPYs, null, 2));
+  console.log('🔥 DASHBOARD: APY success?', positionAPYs?.success);
+  console.log('🔥 DASHBOARD: APY positions?', positionAPYs?.positions);
+  console.log('🔥 DASHBOARD: APY positions keys:', positionAPYs?.positions ? Object.keys(positionAPYs.positions) : 'NO POSITIONS');
 
-  if (isLoading) {
+  if (isLoading || apyLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <LoadingSpinner size="lg" />
-        <p className="text-white ml-4">Loading wallet data...</p>
+        <p className="text-white ml-4">
+          {isLoading && apyLoading ? 'Loading portfolio and APY data...' :
+           isLoading ? 'Loading wallet data...' : 'Loading APY data...'}
+        </p>
       </div>
     );
   }
@@ -342,6 +367,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
+
   return (
     <div className="space-y-6">
       <AdminViewBanner />
@@ -509,6 +535,44 @@ const Dashboard: React.FC = () => {
                 <p className="text-xs text-gray-500">Active connections</p>
               </div>
               <Wallet className="w-8 h-8 text-hermetik-gold" />
+            </div>
+          </div>
+
+          {/* Average APY */}
+          <div className="card-hermetik p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-400 font-heading">Average APY</p>
+                {apyLoading ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-hermetik-gold"></div>
+                    <p className="text-sm text-gray-400">Loading...</p>
+                  </div>
+                ) : positionAPYs?.success && positionAPYs.positions ? (
+                  <>
+                    <p className="text-xl font-bold text-hermetik-gold">
+                      {(() => {
+                        const apyValues = Object.values(positionAPYs.positions)
+                          .filter((apy: any) => apy.apy !== null && apy.apy !== undefined)
+                          .map((apy: any) => apy.apy);
+                        const avgApy = apyValues.length > 0 
+                          ? apyValues.reduce((sum: number, apy: number) => sum + apy, 0) / apyValues.length 
+                          : 0;
+                        return avgApy >= 0 ? `+${avgApy.toFixed(2)}%` : `${avgApy.toFixed(2)}%`;
+                      })()}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {Object.keys(positionAPYs.positions).length} positions
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xl font-bold text-gray-500">--</p>
+                    <p className="text-xs text-gray-500">No data available</p>
+                  </>
+                )}
+              </div>
+              <BarChart3 className="w-8 h-8 text-hermetik-gold" />
             </div>
           </div>
         </div>
