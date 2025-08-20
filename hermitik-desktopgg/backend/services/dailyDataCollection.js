@@ -1,7 +1,9 @@
 // services/dailyDataCollection.js - FIXED VERSION
+const axios = require('axios');
 const User = require('../models/User');
 const DataStandardizationService = require('./dataStandardization');
-const axios = require('axios');
+const ErrorUtils = require('../utils/errorUtils');
+const httpClient = require('../utils/httpClient');
 
 const DEBANK_BASE = 'https://pro-openapi.debank.com/v1';
 const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
@@ -254,29 +256,42 @@ class DailyDataCollectionService {
         };
       });
       
-      // Process protocols
+      // Process protocols with correct API structure
       const processedProtocols = protocols
-        .filter(protocol => protocol.net_usd_value && protocol.net_usd_value > 0.01)
-        .map(protocol => ({
-          protocol_id: protocol.id,
-          name: protocol.name,
-          chain: protocol.chain_id,
-          net_usd_value: protocol.net_usd_value || 0,
-          logo_url: protocol.logo_url,
-          positions: (protocol.portfolio_item_list || []).map(item => ({
-            position_name: item.name,
-            tokens: (item.detail?.supply_token_list || []).map(t => ({
-              symbol: t.symbol,
-              amount: t.amount,
-              usd_value: t.amount * t.price
-            })),
-            rewards: (item.detail?.reward_token_list || []).map(t => ({
-              symbol: t.symbol,
-              amount: t.amount,
-              usd_value: t.amount * t.price
+        .filter(protocol => {
+          // Calculate total value from portfolio items if net_usd_value is missing
+          const totalValue = (protocol.portfolio_item_list || []).reduce((sum, item) => {
+            return sum + (item.stats?.net_usd_value || 0);
+          }, 0);
+          return totalValue > 0.01;
+        })
+        .map(protocol => {
+          // Calculate net value from portfolio items
+          const calculatedNetValue = (protocol.portfolio_item_list || []).reduce((sum, item) => {
+            return sum + (item.stats?.net_usd_value || 0);
+          }, 0);
+          
+          return {
+            protocol_id: protocol.id,
+            name: protocol.name,
+            chain: protocol.chain,
+            net_usd_value: calculatedNetValue,
+            logo_url: protocol.logo_url,
+            positions: (protocol.portfolio_item_list || []).map(item => ({
+              position_name: item.name,
+              tokens: (item.detail?.supply_token_list || []).map(t => ({
+                symbol: t.symbol,
+                amount: t.amount,
+                usd_value: (t.amount || 0) * (t.price || 0)
+              })),
+              rewards: (item.detail?.reward_token_list || []).map(t => ({
+                symbol: t.symbol,
+                amount: t.amount,
+                usd_value: (t.amount || 0) * (t.price || 0)
+              }))
             }))
-          }))
-        }));
+          };
+        });
       
       // Calculate summary
       const tokenValue = enrichedTokens.reduce((sum, token) => sum + (token.usd_value || 0), 0);
@@ -306,8 +321,15 @@ class DailyDataCollectionService {
       return savedSnapshot;
       
     } catch (error) {
-      console.error(`❌ Error processing wallet ${walletAddress}:`, error.message);
-      throw error;
+      console.error(`❌ Error processing wallet ${walletAddress}:`, {
+        message: error.message,
+        stack: error.stack,
+        walletAddress,
+        userId
+      });
+      
+      // Re-throw with more context
+      throw new Error(`Failed to process wallet ${walletAddress} for user ${userId}: ${error.message}`);
     }
   }
   
@@ -326,17 +348,22 @@ class DailyDataCollectionService {
       const processedWallets = new Set();
       const walletUserPairs = [];
       
-      for (const user of users) {
-        for (const wallet of user.wallets) {
-          const walletKey = `${user._id}-${wallet}`;
-          if (!processedWallets.has(walletKey)) {
-            processedWallets.add(walletKey);
-            walletUserPairs.push({ userId: user._id, wallet });
+      try {
+        for (const user of users) {
+          for (const wallet of user.wallets) {
+            const walletKey = `${user._id}-${wallet}`;
+            if (!processedWallets.has(walletKey)) {
+              processedWallets.add(walletKey);
+              walletUserPairs.push({ userId: user._id, wallet });
+            }
           }
         }
+        
+        console.log(`Processing ${walletUserPairs.length} unique wallet-user combinations`);
+      } finally {
+        // Clean up memory to prevent leaks
+        processedWallets.clear();
       }
-      
-      console.log(`Processing ${walletUserPairs.length} unique wallet-user combinations`);
       
       const results = [];
       

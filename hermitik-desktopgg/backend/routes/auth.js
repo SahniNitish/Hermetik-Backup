@@ -4,12 +4,14 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const ApiResponse = require('../utils/responseFormatter');
+const { AppError, catchAsync } = require('../middleware/errorHandler');
 const router = express.Router();
 
 // Role-based middleware
 const requireAdmin = (req, res, next) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json(ApiResponse.error('Admin access required', 403));
   }
   next();
 };
@@ -75,14 +77,14 @@ router.post('/admin-signup', async (req, res) => {
 });
 
 // Login route
-router.post('/login', async (req, res) => {
+router.post('/login', catchAsync(async (req, res) => {
   console.log('Login request received:', { email: req.body.email });
   
   const { email, password } = req.body;
   
   // Validation
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    throw new AppError('Email and password are required', 400);
   }
   
   try {
@@ -90,14 +92,14 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       console.log('User not found:', email);
-      return res.status(404).json({ error: 'User not found' });
+      throw new AppError('User not found', 404);
     }
     
     // Check password
     const match = await bcrypt.compare(password, user.password);
     if (!match) {
       console.log('Invalid password for user:', email);
-      return res.status(401).json({ error: 'Invalid password' });
+      throw new AppError('Invalid password', 401);
     }
     
     // Generate JWT token
@@ -109,54 +111,46 @@ router.post('/login', async (req, res) => {
     
     console.log('Login successful for user:', { id: user._id, email: user.email, role: user.role });
     
-    res.json({ 
-      message: 'Login successful', 
-      token,
-      user: {
-        id: user._id,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      }
-    });
+    res.json(ApiResponse.success(
+      {
+        token,
+        user: {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          role: user.role
+        }
+      },
+      'Login successful'
+    ));
   } catch (err) {
     console.error('Login error:', err);
-    res.status(500).json({ error: 'Server error during login' });
+    throw new AppError('Server error during login', 500);
   }
-});
+}));
 
 // Get user profile (protected route)
-router.get('/profile', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select('-password');
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    res.json({ user });
-  } catch (err) {
-    console.error('Profile fetch error:', err);
-    res.status(500).json({ error: 'Server error' });
+router.get('/profile', auth, catchAsync(async (req, res) => {
+  const user = await User.findById(req.user.id).select('-password');
+  if (!user) {
+    throw new AppError('User not found', 404);
   }
-});
+  res.json(ApiResponse.success({ user }, 'Profile retrieved successfully'));
+}));
 
 // Get wallet addresses for authenticated user
-router.get('/wallet', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    if (!user.wallets || user.wallets.length === 0) {
-      return res.status(400).json({ error: 'No wallets added' });
-    }
-    
-    res.json({ wallets: user.wallets });
-  } catch (err) {
-    console.error('Wallet fetch error:', err);
-    res.status(500).json({ error: 'Server error' });
+router.get('/wallet', auth, catchAsync(async (req, res) => {
+  const user = await User.findById(req.user.id);
+  if (!user) {
+    throw new AppError('User not found', 404);
   }
-});
+  
+  if (!user.wallets || user.wallets.length === 0) {
+    throw new AppError('No wallets added', 400);
+  }
+  
+  res.json(ApiResponse.success({ wallets: user.wallets }, 'Wallets retrieved successfully'));
+}));
 
 // Add wallet address (moved from wallet.js for consistency)
 router.post('/add-wallet', auth, async (req, res) => {

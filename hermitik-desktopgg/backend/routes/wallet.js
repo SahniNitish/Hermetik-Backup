@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const WalletData = require('../models/WalletData');
 const DailySnapshot = require('../models/DailySnapshot');
+const ApiResponse = require('../utils/responseFormatter');
+const { AppError, catchAsync } = require('../middleware/errorHandler');
 const {
   fetchTokens,
   fetchAllProtocols,
@@ -21,29 +23,29 @@ const CHAINS = ['eth', 'bsc', 'arb', 'matic', 'base', 'op'];
 // Auth middleware
 async function auth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
+  if (!token) return res.status(401).json(ApiResponse.error('No token provided', 401));
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(payload.id);
-    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (!user) return res.status(401).json(ApiResponse.error('User not found', 401));
     req.user = { ...user.toObject(), role: payload.role }; // Include role from token
     next();
   } catch {
-    res.status(403).json({ error: 'Invalid token' });
+    res.status(403).json(ApiResponse.error('Invalid token', 403));
   }
 }
 
 // Role-based middleware for wallet routes
 const requireAdmin = (req, res, next) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required' });
+    return res.status(403).json(ApiResponse.error('Admin access required', 403));
   }
   next();
 };
 
 const requireUser = (req, res, next) => {
   if (!req.user.role || (req.user.role !== 'admin' && req.user.role !== 'user')) {
-    return res.status(403).json({ error: 'User access required' });
+    return res.status(403).json(ApiResponse.error('User access required', 403));
   }
   next();
 };
@@ -85,10 +87,11 @@ function deduplicateProtocolsById(protocols) {
 
 // Function to create DailySnapshot from wallet data
 async function createDailySnapshot(userId, walletAddress, walletResult) {
+  const operationId = `snapshot-${walletAddress}-${Date.now()}`;
   try {
-    console.log(`📸 SNAPSHOT FUNCTION CALLED - Creating daily snapshot for wallet ${walletAddress}`);
-    console.log(`📸 SNAPSHOT FUNCTION - User ID: ${userId}`);
-    console.log(`📸 SNAPSHOT FUNCTION - Wallet result keys:`, Object.keys(walletResult));
+    console.log(`📸 [${operationId}] Creating daily snapshot for wallet ${walletAddress}`);
+    console.log(`📸 [${operationId}] User ID: ${userId}`);
+    console.log(`📸 [${operationId}] Wallet result keys:`, Object.keys(walletResult));
     
     // Check if we already have a snapshot for today
     const today = new Date();
@@ -131,27 +134,34 @@ async function createDailySnapshot(userId, walletAddress, walletResult) {
       userId,
       walletAddress,
       date: today,
-      totalNavUsd: walletResult.summary.total_usd_value,
-      tokensNavUsd: walletResult.summary.token_usd_value,
-      positionsNavUsd: walletResult.summary.protocol_usd_value,
-      tokens: walletResult.tokens.map(token => ({
-        symbol: token.symbol,
-        name: token.name,
-        chain: token.chain,
-        amount: token.amount,
-        price: token.price,
-        usdValue: token.usd_value,
-        logoUrl: token.logo_url
+      totalNavUsd: Math.max(0, parseFloat(walletResult.summary?.total_usd_value) || 0),
+      tokensNavUsd: Math.max(0, parseFloat(walletResult.summary?.token_usd_value) || 0),
+      positionsNavUsd: Math.max(0, parseFloat(walletResult.summary?.protocol_usd_value) || 0),
+      tokens: (walletResult.tokens || []).map(token => ({
+        symbol: token.symbol || 'UNKNOWN',
+        name: token.name || '',
+        chain: token.chain || 'unknown',
+        amount: Math.max(0, parseFloat(token.amount) || 0),
+        price: Math.max(0, parseFloat(token.price) || 0),
+        usdValue: Math.max(0, parseFloat(token.usd_value) || 0),
+        decimals: parseInt(token.decimals) || 18,
+        logoUrl: token.logo_url || '',
+        isVerified: Boolean(token.is_verified)
       })),
-      positions: createPositionsFromProtocols(walletResult.protocols)
+      positions: createPositionsFromProtocols(walletResult.protocols || [])
     });
     
     await snapshot.save();
     console.log(`📸 Created new snapshot for wallet ${walletAddress}`);
     return snapshot;
   } catch (error) {
-    console.error(`❌ Error creating snapshot for wallet ${walletAddress}:`, error);
-    return null;
+    console.error(`❌ [${operationId}] Error creating snapshot for wallet ${walletAddress}:`, {
+      message: error.message,
+      stack: error.stack,
+      userId,
+      walletAddress
+    });
+    throw new AppError(`Failed to create snapshot for wallet ${walletAddress}: ${error.message}`, 500);
   }
 }
 
@@ -159,26 +169,46 @@ async function createDailySnapshot(userId, walletAddress, walletResult) {
 function createPositionsFromProtocols(protocols) {
   const positions = [];
   
+  if (!Array.isArray(protocols)) {
+    console.log('⚠️ createPositionsFromProtocols: protocols is not an array:', typeof protocols);
+    return positions;
+  }
+  
   protocols.forEach(protocol => {
+    if (!protocol || !Array.isArray(protocol.positions)) {
+      console.log('⚠️ createPositionsFromProtocols: protocol has no positions array:', protocol);
+      return;
+    }
+    
     protocol.positions.forEach(position => {
       positions.push({
         protocolId: protocol.protocol_id,
         protocolName: protocol.name,
         chain: protocol.chain,
-        supplyTokens: position.tokens.map(token => ({
-          symbol: token.symbol,
-          amount: token.amount,
-          price: token.price,
-          usdValue: token.usd_value
+        supplyTokens: (position.tokens || []).map(token => ({
+          symbol: token.symbol || 'UNKNOWN',
+          name: token.name || '',
+          chain: token.chain || 'unknown',
+          amount: Math.max(0, parseFloat(token.amount) || 0),
+          price: Math.max(0, parseFloat(token.price) || 0),
+          usdValue: Math.max(0, parseFloat(token.usd_value) || 0),
+          decimals: parseInt(token.decimals) || 18,
+          logoUrl: token.logo_url || '',
+          isVerified: Boolean(token.is_verified)
         })),
-        rewardTokens: position.rewards.map(reward => ({
-          symbol: reward.symbol,
-          amount: reward.amount,
-          price: reward.price,
-          usdValue: reward.usd_value
+        rewardTokens: (position.rewards || []).map(reward => ({
+          symbol: reward.symbol || 'UNKNOWN',
+          name: reward.name || '',
+          chain: reward.chain || 'unknown',
+          amount: Math.max(0, parseFloat(reward.amount) || 0),
+          price: Math.max(0, parseFloat(reward.price) || 0),
+          usdValue: Math.max(0, parseFloat(reward.usd_value) || 0),
+          decimals: parseInt(reward.decimals) || 18,
+          logoUrl: reward.logo_url || '',
+          isVerified: Boolean(reward.is_verified)
         })),
-        totalUsdValue: position.tokens.reduce((sum, token) => sum + token.usd_value, 0) +
-                       position.rewards.reduce((sum, reward) => sum + reward.usd_value, 0)
+        totalUsdValue: (position.tokens || []).reduce((sum, token) => sum + Math.max(0, parseFloat(token.usd_value) || 0), 0) +
+                       (position.rewards || []).reduce((sum, reward) => sum + Math.max(0, parseFloat(reward.usd_value) || 0), 0)
       });
     });
   });
@@ -215,7 +245,7 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
     wallets = user.wallets || [];
   }
   
-  if (!wallets.length) return res.status(400).json({ error: 'No wallets added' });
+  if (!wallets.length) return res.status(400).json(ApiResponse.error('No wallets added', 400));
 
   console.log(`🚀 Processing ${wallets.length} wallets...`);
 
@@ -569,14 +599,17 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
       // Continue with response even if snapshot creation fails
     }
     
-    res.json({ 
-      portfolios: results,
-      overall_summary: overallSummary,
-      timestamp: new Date().toISOString()
-    });
+    res.json(ApiResponse.success(
+      { 
+        portfolios: results,
+        overall_summary: overallSummary,
+        timestamp: new Date().toISOString()
+      },
+      'Wallets data retrieved successfully'
+    ));
   } catch (err) {
     console.error('❌ Main error in /wallets route:', err.response?.data || err.message);
-    res.status(500).json({ error: 'Failed to fetch wallet and protocol data', details: err.message });
+    res.status(500).json(ApiResponse.error('Failed to fetch wallet and protocol data', 500, err.message));
   }
 });
 

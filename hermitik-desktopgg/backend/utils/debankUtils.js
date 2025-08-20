@@ -1,30 +1,23 @@
-const axios = require('axios');
-const DEBANK_BASE = 'https://pro-openapi.debank.com/v1';
-const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
+const httpClient = require('./httpClient');
 const CHAINS = ['eth', 'bsc', 'arb', 'matic', 'base', 'op'];
 
 async function fetchTokens(address) {
   let allTokens = [];
-  console.log(`🔍 Fetching tokens for address: ${address}`);
+  const validatedAddress = httpClient.validateWalletAddress(address);
+  console.log(`🔍 Fetching tokens for address: ${validatedAddress}`);
+  
+  const debankClient = httpClient.createDebankClient();
   
   for (const chain of CHAINS) {
     try {
+      httpClient.validateChainId(chain);
       console.log(`📡 Fetching tokens from ${chain}...`);
-      const { data } = await axios.get(
-        `${DEBANK_BASE}/user/token_list`,
-        {
-          params: { 
-            id: address, 
-            chain_id: chain, 
-            is_all: false // Changed back to false to avoid spam tokens
-          },
-          headers: { 
-            AccessKey: process.env.DEBANK_API_KEY, 
-            Accept: 'application/json' 
-          },
-          timeout: 10000
-        }
-      );
+      
+      const data = await debankClient.get('/user/token_list', {
+        id: validatedAddress, 
+        chain_id: chain, 
+        is_all: false // Changed back to false to avoid spam tokens
+      });
       
       console.log(`✅ Found ${data.length} tokens on ${chain}`);
      
@@ -48,10 +41,11 @@ async function fetchTokens(address) {
       allTokens.push(...tokensWithChain);
     } catch (err) {
       console.error(`❌ Error fetching tokens for ${chain}:`, {
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        data: err.response?.data,
-        message: err.message
+        operationId: err.operationId,
+        statusCode: err.statusCode,
+        message: err.message,
+        chain,
+        address: validatedAddress
       });
     }
   }
@@ -135,20 +129,15 @@ async function fetchPricesFromCoinGecko(tokens) {
   }
   
   try {
-    const { data } = await axios.get(
-      `${COINGECKO_BASE}/simple/price`,
-      { 
-        params: { 
-          ids: coinGeckoIds.join(','), 
-          vs_currencies: 'usd',
-          include_market_cap: true,
-          include_24hr_vol: true,
-          include_24hr_change: true,
-          include_last_updated_at: true 
-        },
-        timeout: 15000
-      }
-    );
+    const coinGeckoClient = httpClient.createCoinGeckoClient();
+    const data = await coinGeckoClient.get('/simple/price', {
+      ids: coinGeckoIds.join(','), 
+      vs_currencies: 'usd',
+      include_market_cap: true,
+      include_24hr_vol: true,
+      include_24hr_change: true,
+      include_last_updated_at: true 
+    });
     
     console.log(`✅ Fetched prices for ${Object.keys(data).length} tokens`);
     
@@ -170,25 +159,20 @@ async function fetchPricesFromCoinGecko(tokens) {
 
 async function fetchAllProtocols(address) {
   let allProtocols = [];
-  console.log(`🔍 Fetching all protocols for address: ${address}`);
+  const validatedAddress = httpClient.validateWalletAddress(address);
+  console.log(`🔍 Fetching all protocols for address: ${validatedAddress}`);
+  
+  const debankClient = httpClient.createDebankClient();
   
   for (const chain of CHAINS) {
     try {
+      httpClient.validateChainId(chain);
       console.log(`📡 Fetching protocols from ${chain}...`);
-      const { data } = await axios.get(
-        `${DEBANK_BASE}/user/all_complex_protocol_list`,
-        {
-          params: { 
-            id: address, 
-            chain_id: chain 
-          },
-          headers: { 
-            AccessKey: process.env.DEBANK_API_KEY, 
-            Accept: 'application/json' 
-          },
-          timeout: 10000
-        }
-      );
+      
+      const data = await debankClient.get('/user/all_complex_protocol_list', {
+        id: validatedAddress, 
+        chain_id: chain 
+      });
    
       if (data && data.length > 0) {
         console.log(`✅ Found ${data.length} protocols on ${chain}`);
@@ -200,8 +184,11 @@ async function fetchAllProtocols(address) {
       }
     } catch (err) {
       console.error(`❌ Error fetching protocols for ${chain}:`, {
-        status: err.response?.status,
-        message: err.message
+        operationId: err.operationId,
+        statusCode: err.statusCode,
+        message: err.message,
+        chain,
+        address: validatedAddress
       });
     }
   }

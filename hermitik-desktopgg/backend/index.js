@@ -19,6 +19,10 @@ app.use(cors({
 
 app.use(express.json());
 
+// Import error handling middleware
+const { globalErrorHandler } = require('./middleware/errorHandler');
+const ApiResponse = require('./utils/responseFormatter');
+
 // Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI).then(() => {
   console.log('Connected to MongoDB');
@@ -39,10 +43,11 @@ app.post('/api/admin/collect-data', async (req, res) => {
   try {
     // Check if data collection is already running
     if (dataCollectionRunning) {
-      return res.status(429).json({ 
-        error: 'Data collection is already running. Please wait for it to complete.',
-        status: 'already_running'
-      });
+      return res.status(429).json(ApiResponse.error(
+        'Snapshot collection is already running. Please wait for it to complete.',
+        429,
+        { status: 'already_running' }
+      ));
     }
 
     // Set the flag to prevent concurrent runs
@@ -56,22 +61,25 @@ app.post('/api/admin/collect-data', async (req, res) => {
     // Run data collection in background and respond immediately
     const results = await DailyDataCollectionService.runDailyCollection();
     
-    res.json({ 
-      message: 'Data collection completed', 
-      results,
-      summary: {
-        total: results.length,
-        successful: results.filter(r => r.success).length,
-        failed: results.filter(r => !r.success).length
-      }
-    });
+    res.json(ApiResponse.success(
+      {
+        results,
+        summary: {
+          total: results.length,
+          successful: results.filter(r => r.success).length,
+          failed: results.filter(r => !r.success).length
+        }
+      },
+      'Snapshots collected successfully for all users'
+    ));
     
   } catch (error) {
     console.error('❌ Error in manual data collection:', error);
-    res.status(500).json({ 
-      error: error.message,
-      status: 'error'
-    });
+    res.status(500).json(ApiResponse.error(
+      `Snapshot collection failed: ${error.message}`,
+      500,
+      { status: 'error' }
+    ));
   } finally {
     // Always reset the flag when done
     dataCollectionRunning = false;
@@ -80,10 +88,13 @@ app.post('/api/admin/collect-data', async (req, res) => {
 
 // Add a status endpoint to check if data collection is running
 app.get('/api/admin/collect-data/status', (req, res) => {
-  res.json({ 
-    running: dataCollectionRunning,
-    status: dataCollectionRunning ? 'running' : 'idle'
-  });
+  res.json(ApiResponse.success(
+    { 
+      running: dataCollectionRunning,
+      status: dataCollectionRunning ? 'running' : 'idle'
+    },
+    'Snapshot status retrieved successfully'
+  ));
 });
 
 // Add a health check endpoint
@@ -95,6 +106,9 @@ app.get('/api/health', (req, res) => {
     dataCollection: dataCollectionRunning ? 'running' : 'idle'
   });
 });
+
+// Global error handler (must be last middleware)
+app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

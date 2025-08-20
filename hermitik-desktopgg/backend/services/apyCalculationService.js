@@ -93,15 +93,25 @@ class APYCalculationService {
         // NEW POSITION: Assume exactly 1 day old
         return this.calculateNewPositionAPY(todayPosition, unclaimedRewards, currentValue, positionId);
       } else {
-        // EXISTING POSITION: Calculate based on actual time difference
-        return this.calculateExistingPositionAPY(
-          todayPosition, 
-          yesterdayPosition, 
-          todayDate, 
-          yesterdayDate, 
-          currentValue,
-          positionId
-        );
+        // EXISTING POSITION: Check if we should use unclaimed rewards or value change
+        const yesterdayValue = yesterdayPosition.totalUsdValue || 0;
+        const yesterdayRewards = this.calculateUnclaimedRewards(yesterdayPosition);
+        
+        // If there are unclaimed rewards and position value hasn't changed significantly, use rewards method
+        if (unclaimedRewards > 0 && Math.abs(currentValue - yesterdayValue) < (currentValue * 0.01)) {
+          console.log(`💰 Using unclaimed rewards method for ${positionId} (rewards: $${unclaimedRewards})`);
+          return this.calculateRewardsBasedAPY(todayPosition, unclaimedRewards, currentValue, positionId);
+        } else {
+          // Use value change method
+          return this.calculateExistingPositionAPY(
+            todayPosition, 
+            yesterdayPosition, 
+            todayDate, 
+            yesterdayDate, 
+            currentValue,
+            positionId
+          );
+        }
       }
 
     } catch (error) {
@@ -148,6 +158,52 @@ class APYCalculationService {
       unclaimedRewards: unclaimedRewards,
       confidence: this.assessConfidence(apy, true),
       notes: 'Assumed 1 day old based on unclaimed rewards'
+    };
+  }
+
+  /**
+   * Calculate APY based on unclaimed rewards (for positions with stable values)
+   * Formula: APY = (unclaimed_rewards / position_value) * 365
+   */
+  static calculateRewardsBasedAPY(position, unclaimedRewards, currentValue, positionId) {
+    console.log(`💰 Calculating rewards-based APY for ${positionId}`);
+    
+    if (unclaimedRewards <= 0) {
+      console.log(`⚠️ No unclaimed rewards for position ${positionId}`);
+      return {
+        apy: 0,
+        periodReturn: 0,
+        days: 1,
+        isNewPosition: false,
+        calculationMethod: 'rewards_based_apy',
+        currentValue: currentValue,
+        unclaimedRewards: unclaimedRewards,
+        confidence: 'medium',
+        notes: 'No unclaimed rewards available'
+      };
+    }
+
+    // More conservative APY calculation
+    // Assume rewards accumulated over a reasonable period (7-30 days) instead of 1 day
+    const assumedDays = Math.min(30, Math.max(7, unclaimedRewards / (currentValue * 0.001))); // Dynamic based on reward size
+    const dailyReturn = unclaimedRewards / (currentValue * assumedDays);
+    const apy = dailyReturn * 365 * 100; // Convert to percentage
+
+    // Cap APY at reasonable levels (max 200% for rewards-based calculation)
+    const cappedAPY = Math.min(200, apy);
+
+    console.log(`📈 Rewards-based APY: ${cappedAPY.toFixed(2)}% (rewards: $${unclaimedRewards.toFixed(2)}, value: $${currentValue.toFixed(2)}, assumed days: ${assumedDays.toFixed(1)})`);
+
+    return {
+      apy: Math.round(cappedAPY * 100) / 100, // Round to 2 decimal places
+      periodReturn: Math.round(dailyReturn * 10000) / 100, // Daily return as percentage
+      days: assumedDays,
+      isNewPosition: false,
+      calculationMethod: 'rewards_based_apy',
+      currentValue: currentValue,
+      unclaimedRewards: unclaimedRewards,
+      confidence: this.assessConfidence(cappedAPY, false),
+      notes: `Based on unclaimed rewards (assumed ${assumedDays.toFixed(1)} days accumulation)`
     };
   }
 

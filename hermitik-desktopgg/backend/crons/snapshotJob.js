@@ -29,14 +29,15 @@ const runDailySnapshot = async () => {
           date: new Date(),
 
           tokens: tokens.map(t => ({
-            symbol: t.symbol,
-            name: t.name,
-            chain: t.chain,
-            amount: t.amount,
-            price: t.price,
-            usdValue: t.usd_value,
-            decimals: t.decimals,
-            logoUrl: t.logo_url
+            symbol: t.symbol || 'UNKNOWN',
+            name: t.name || '',
+            chain: t.chain || 'unknown',
+            amount: Math.max(0, parseFloat(t.amount) || 0),
+            price: Math.max(0, parseFloat(t.price) || 0),
+            usdValue: Math.max(0, parseFloat(t.usd_value) || 0),
+            decimals: parseInt(t.decimals) || 18,
+            logoUrl: t.logo_url || '',
+            isVerified: Boolean(t.is_verified)
           })),
 
           positions: protocols.flatMap(p =>
@@ -48,9 +49,42 @@ const runDailySnapshot = async () => {
               assetUsdValue: item.stats?.asset_usd_value || 0,
               debtUsdValue: item.stats?.debt_usd_value || 0,
               totalUsdValue: item.stats?.net_usd_value || 0,
-              supplyTokens: item.detail?.supply_token_list || [],
-              rewardTokens: item.detail?.reward_token_list || [],
-              borrowTokens: item.detail?.borrow_token_list || [],
+              supplyTokens: (item.detail?.supply_token_list || []).map(token => ({
+                symbol: token.symbol || 'UNKNOWN',
+                name: token.name || '',
+                chain: token.chain || 'unknown',
+                amount: Math.max(0, parseFloat(token.amount) || 0),
+                price: Math.max(0, parseFloat(token.price) || 0),
+                usdValue: Math.max(0, parseFloat(token.usd_value) || 0),
+                decimals: parseInt(token.decimals) || 18,
+                logoUrl: token.logo_url || '',
+                isVerified: Boolean(token.is_verified)
+              })),
+              rewardTokens: (item.detail?.reward_token_list || []).map(token => ({
+                symbol: token.symbol || 'UNKNOWN',
+                name: token.name || '',
+                chain: token.chain || 'unknown',
+                amount: Math.max(0, parseFloat(token.amount) || 0),
+                price: Math.max(0, parseFloat(token.price) || 0),
+                usdValue: Math.max(0, parseFloat(token.usd_value) || 0),
+                decimals: parseInt(token.decimals) || 18,
+                logoUrl: token.logo_url || '',
+                isVerified: Boolean(token.is_verified)
+              })),
+              borrowTokens: (item.detail?.borrow_token_list || []).map(token => ({
+                symbol: token.symbol || 'UNKNOWN',
+                name: token.name || '',
+                chain: token.chain || 'unknown',
+                amount: Math.max(0, parseFloat(token.amount) || 0),
+                price: Math.max(0, parseFloat(token.price) || 0),
+                usdValue: Math.max(0, parseFloat(token.usd_value) || 0),
+                decimals: parseInt(token.decimals) || 18,
+                logoUrl: token.logo_url || '',
+                isVerified: Boolean(token.is_verified)
+              })),
+              totalUsdValue: (item.detail?.supply_token_list || []).reduce((sum, token) => sum + Math.max(0, parseFloat(token.usd_value) || 0), 0) +
+                            (item.detail?.reward_token_list || []).reduce((sum, token) => sum + Math.max(0, parseFloat(token.usd_value) || 0), 0) +
+                            (item.detail?.borrow_token_list || []).reduce((sum, token) => sum + Math.max(0, parseFloat(token.usd_value) || 0), 0),
               dailyApy: p.lending_rate,
               lendingRate: p.lending_rate,
               itemType: item.name,

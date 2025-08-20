@@ -1,8 +1,12 @@
 const express = require('express');
 const auth = require('../middleware/auth');
 const XLSX = require('xlsx');
+const ApiResponse = require('../utils/responseFormatter');
+const { AppError, catchAsync } = require('../middleware/errorHandler');
 
 const router = express.Router();
+
+console.log('🚨 ANALYTICS ROUTES FILE LOADED!');
 
 // Import models
 const DailySnapshot = require('../models/DailySnapshot');
@@ -21,13 +25,14 @@ const {
 } = require('../utils/debankUtils');
 
 // Simple test route
-router.get('/test', auth, async (req, res) => {
-  res.json({ 
-    message: 'Analytics routes working!', 
+router.get('/test', auth, catchAsync(async (req, res) => {
+  console.log('🚨 TEST ENDPOINT CALLED!');
+  res.json({
+    CHANGED: "SERVER_IS_WORKING", 
     userId: req.user.id,
     timestamp: new Date().toISOString()
   });
-});
+}));
 
 // Get portfolio history
 router.get('/portfolio/history', auth, async (req, res) => {
@@ -1763,54 +1768,60 @@ router.get('/portfolio/apy-performance', auth, async (req, res) => {
   }
 });
 
-// Get APY calculations for all user positions
-router.get('/positions/apy', auth, async (req, res) => {
+// Get APY calculations for all user positions - WORKING VERSION
+router.get('/positions/apy', auth, catchAsync(async (req, res) => {
+  const userId = req.user.id;
+  const targetDate = req.query.targetDate;
+  
+  console.log(`🔥 APY ENDPOINT CALLED for user: ${userId}`);
+  
   try {
-    const userId = req.user.id;
-    const { targetDate } = req.query;
-    
-    console.log(`🔥 APY API REQUEST - User ID: ${userId}`);
-    console.log(`🔥 APY API REQUEST - User object:`, req.user);
-    
     const targetDateTime = targetDate ? new Date(targetDate) : new Date();
     
-    // Check if user has snapshots first
-    const todaySnapshots = await DailySnapshot.find({ userId }).sort({ date: -1 }).limit(1);
-    console.log(`🔥 APY API REQUEST - User has ${todaySnapshots.length} snapshots`);
-    
-    if (todaySnapshots.length > 0) {
-      console.log(`🔥 APY API REQUEST - Latest snapshot date: ${todaySnapshots[0].date}`);
-      console.log(`🔥 APY API REQUEST - Latest snapshot positions: ${todaySnapshots[0].positions?.length || 0}`);
-    }
-    
-    // Use the new clean APY calculation service
+    // Get APY calculations directly from service
     const apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime);
+    console.log(`🔥 APY Service returned ${Object.keys(apyResults).length} positions`);
     
-    // Format APY results for display
+    // Format results for frontend
     const formattedResults = {};
     Object.entries(apyResults).forEach(([positionId, apyData]) => {
-      formattedResults[positionId] = APYCalculationService.formatAPYForDisplay(apyData);
+      const formatted = APYCalculationService.formatAPYForDisplay(apyData);
+      if (formatted && formatted.apy !== null && formatted.apy !== undefined) {
+        formattedResults[positionId] = formatted;
+        console.log(`🔥 Position ${positionId}: ${formatted.formattedAPY}`);
+      }
     });
     
-    console.log(`🔥 APY API RESPONSE - Calculated for ${Object.keys(formattedResults).length} positions`);
-    console.log(`🔥 APY API RESPONSE - Position IDs: ${Object.keys(formattedResults)}`);
+    console.log(`🔥 Returning ${Object.keys(formattedResults).length} formatted positions`);
     
-    const response = {
-      userId,
-      targetDate: targetDateTime,
-      positions: formattedResults,
-      positionCount: Object.keys(formattedResults).length,
-      success: true
-    };
+    // Return data in the format expected by frontend
+    res.json({
+      success: true,
+      data: {
+        userId,
+        targetDate: targetDateTime,
+        positions: formattedResults,
+        positionCount: Object.keys(formattedResults).length
+      },
+      message: 'APY calculations retrieved successfully',
+      timestamp: new Date().toISOString()
+    });
     
-    console.log(`🔥 APY API RESPONSE - Sending:`, JSON.stringify(response, null, 2));
-    
-    res.json(response);
   } catch (error) {
-    console.error('🔥 APY API ERROR:', error);
-    res.status(500).json({ error: error.message });
+    console.error('🔥 APY ERROR:', error);
+    res.json({
+      success: false,
+      error: error.message,
+      data: {
+        userId,
+        targetDate: new Date(),
+        positions: {},
+        positionCount: 0
+      },
+      timestamp: new Date().toISOString()
+    });
   }
-});
+}));
 
 // Note: Individual position APY lookup removed - use /positions/apy to get all position APYs
 
