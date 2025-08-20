@@ -77,12 +77,36 @@ class APYCalculationService {
     try {
       const positionId = this.generatePositionId(todayPosition);
       
-      // Validate position data
-      const currentValue = todayPosition.totalUsdValue || 0;
+      // Validate position data - check multiple possible field names
+      // Handle both plain objects and Mongoose subdocuments
+      const positionData = todayPosition._doc || todayPosition;
+      
+      // Calculate total value from supply tokens and reward tokens
+      const supplyTokensValue = (positionData.supplyTokens || []).reduce((sum, token) => {
+        const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+        return sum + tokenValue;
+      }, 0);
+      const rewardTokensValue = (positionData.rewardTokens || []).reduce((sum, token) => {
+        const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+        return sum + tokenValue;
+      }, 0);
+      const currentValue = positionData.totalUsdValue || positionData.totalValue || positionData.value || positionData.assetUsdValue || (supplyTokensValue + rewardTokensValue);
+      console.log(`🔍 Calculated currentValue: $${currentValue.toFixed(2)} (supply: $${supplyTokensValue.toFixed(2)}, rewards: $${rewardTokensValue.toFixed(2)})`);
+      
       const unclaimedRewards = this.calculateUnclaimedRewards(todayPosition);
       
       if (currentValue <= 0) {
         console.log(`⚠️ Position ${positionId} has no value, skipping APY calculation`);
+        console.log(`🔍 Position fields:`, Object.keys(positionData));
+        console.log(`🔍 Supply tokens value: $${supplyTokensValue}, Reward tokens value: $${rewardTokensValue}`);
+        console.log(`🔍 Supply tokens count: ${positionData.supplyTokens?.length || 0}, Reward tokens count: ${positionData.rewardTokens?.length || 0}`);
+        if (positionData.supplyTokens && positionData.supplyTokens.length > 0) {
+          console.log(`🔍 Sample supply token:`, positionData.supplyTokens[0]);
+        }
+        if (positionData.rewardTokens && positionData.rewardTokens.length > 0) {
+          console.log(`🔍 Sample reward token:`, positionData.rewardTokens[0]);
+        }
+        console.log(`🔍 Value fields: totalUsdValue=${positionData.totalUsdValue}, totalValue=${positionData.totalValue}, value=${positionData.value}, assetUsdValue=${positionData.assetUsdValue}`);
         return null;
       }
 
@@ -94,7 +118,16 @@ class APYCalculationService {
         return this.calculateNewPositionAPY(todayPosition, unclaimedRewards, currentValue, positionId);
       } else {
         // EXISTING POSITION: Check if we should use unclaimed rewards or value change
-        const yesterdayValue = yesterdayPosition.totalUsdValue || 0;
+        const yesterdayPositionData = yesterdayPosition._doc || yesterdayPosition;
+        const yesterdaySupplyTokensValue = (yesterdayPositionData.supplyTokens || []).reduce((sum, token) => {
+          const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+          return sum + tokenValue;
+        }, 0);
+        const yesterdayRewardTokensValue = (yesterdayPositionData.rewardTokens || []).reduce((sum, token) => {
+          const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+          return sum + tokenValue;
+        }, 0);
+        const yesterdayValue = yesterdayPositionData.totalUsdValue || yesterdayPositionData.totalValue || yesterdayPositionData.value || yesterdayPositionData.assetUsdValue || (yesterdaySupplyTokensValue + yesterdayRewardTokensValue);
         const yesterdayRewards = this.calculateUnclaimedRewards(yesterdayPosition);
         
         // If there are unclaimed rewards and position value hasn't changed significantly, use rewards method
@@ -213,7 +246,16 @@ class APYCalculationService {
   static calculateExistingPositionAPY(todayPosition, yesterdayPosition, todayDate, yesterdayDate, currentValue, positionId) {
     console.log(`📊 Existing position detected: ${positionId}`);
     
-    const yesterdayValue = yesterdayPosition.totalUsdValue || 0;
+    const yesterdayPositionData = yesterdayPosition._doc || yesterdayPosition;
+    const yesterdaySupplyTokensValue = (yesterdayPositionData.supplyTokens || []).reduce((sum, token) => {
+      const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+      return sum + tokenValue;
+    }, 0);
+    const yesterdayRewardTokensValue = (yesterdayPositionData.rewardTokens || []).reduce((sum, token) => {
+      const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+      return sum + tokenValue;
+    }, 0);
+    const yesterdayValue = yesterdayPositionData.totalUsdValue || yesterdayPositionData.totalValue || yesterdayPositionData.value || yesterdayPositionData.assetUsdValue || (yesterdaySupplyTokensValue + yesterdayRewardTokensValue);
     
     if (yesterdayValue <= 0) {
       console.log(`⚠️ Yesterday's value is zero for ${positionId}, treating as new position`);
@@ -234,7 +276,8 @@ class APYCalculationService {
     const annualizedReturn = Math.pow(1 + periodReturn, annualizationFactor) - 1;
     const apy = annualizedReturn * 100;
 
-    console.log(`📈 Existing position APY: ${apy.toFixed(2)}% over ${actualDays.toFixed(2)} days (${yesterdayValue.toFixed(2)} → ${currentValue.toFixed(2)})`);
+    console.log(`📈 Existing position APY: ${apy.toFixed(2)}% over ${actualDays.toFixed(2)} days ($${yesterdayValue.toFixed(2)} → $${currentValue.toFixed(2)})`);
+    console.log(`🔍 Value change: $${valueChange.toFixed(2)}, Period return: ${(periodReturn * 100).toFixed(2)}%`);
 
     return {
       apy: Math.round(apy * 100) / 100,
@@ -268,10 +311,21 @@ class APYCalculationService {
 
     if (!snapshot) {
       // If no snapshot for exact date, get the most recent one before target date
-      return await DailySnapshot.findOne({
+      const fallbackSnapshots = await DailySnapshot.find({
         userId,
         date: { $lte: targetDate }
-      }).sort({ date: -1 });
+      }).sort({ date: -1 }).limit(10);
+
+      // Find the first snapshot with positions or positive value
+      for (const fallbackSnapshot of fallbackSnapshots) {
+        if ((fallbackSnapshot.positions && fallbackSnapshot.positions.length > 0) || 
+            (fallbackSnapshot.totalNavUsd && fallbackSnapshot.totalNavUsd > 0)) {
+          return fallbackSnapshot;
+        }
+      }
+
+      // If no snapshot with positions found, return the most recent one
+      return fallbackSnapshots[0] || null;
     }
 
     return snapshot;
@@ -297,10 +351,21 @@ class APYCalculationService {
 
     if (!snapshot) {
       // If no snapshot for exact yesterday, get the most recent one before yesterday
-      return await DailySnapshot.findOne({
+      const fallbackSnapshots = await DailySnapshot.find({
         userId,
         date: { $lt: startOfYesterday }
-      }).sort({ date: -1 });
+      }).sort({ date: -1 }).limit(10);
+
+      // Find the first snapshot with positions or positive value
+      for (const fallbackSnapshot of fallbackSnapshots) {
+        if ((fallbackSnapshot.positions && fallbackSnapshot.positions.length > 0) || 
+            (fallbackSnapshot.totalNavUsd && fallbackSnapshot.totalNavUsd > 0)) {
+          return fallbackSnapshot;
+        }
+      }
+
+      // If no snapshot with positions found, return the most recent one
+      return fallbackSnapshots[0] || null;
     }
 
     return snapshot;
@@ -314,9 +379,12 @@ class APYCalculationService {
     const protocol = (position.protocolName || 'unknown').toLowerCase().replace(/\s+/g, '_');
     const id = position.protocolId || '';
     const chain = position.chain || '';
+    const positionType = position.positionType || 'unknown';
     
     // Use multiple fields to create unique identifier
-    return `${protocol}_${chain}_${id}`.replace(/[^a-z0-9_]/g, '');
+    // Include position type and first token symbol to make it more unique
+    const firstTokenSymbol = position.supplyTokens?.[0]?.symbol || 'unknown';
+    return `${protocol}_${chain}_${positionType}_${firstTokenSymbol}_${id}`.replace(/[^a-z0-9_]/g, '');
   }
 
   /**
