@@ -15,38 +15,58 @@
 1. **Brian Robertson ETH**
    - Email: user4@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0xE71Aa6f45A22Fa1e4C9fB29960248f4A3d4af918
+     - 0xbfa2ef4cab56ace20a4e11bb6080a09d126bf5cd
 
 2. **Gary Baron**
    - Email: user5@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0xb046086f7b6d74a3498d2b994904233ad3246ddc
 
 3. **Lars Kluge**
    - Email: user6@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0x99b3c496751c5c49a58e99cd0f8bd7242fd6284f
 
 4. **Hermetik**
    - Email: user7@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0x2F6C914A6DfA61893FF86e05A30Ce0Dc6065fFF1
+     - 0x6e1cfdbd65676c9588e4aee278008ff48b986074
 
 5. **Quantizer**
    - Email: user8@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0x7e73dA415Af2BBCC11f45aeEf7F2cA60222EC736
 
 6. **Brian Robertson - EvoH ACM2**
    - Email: user9@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0xe71aa6f45a22fa1e4c9fb29960248f4a3d4af918
 
 7. **Brian Robertson - H1 ACM2**
    - Email: user10@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0xFeC9368cF12dFb61bac48f42E9ccACEDe7CAB659
 
 8. **Gary Baron - BFI EVM ACM2**
    - Email: user11@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0x14B5AbD73626a0c1182a6E7DEdB54d3dea1D3a14
 
 9. **Quantizer**
    - Email: user12@hermetik.com
    - Password: password123
+   - Wallets:
+     - 0x7e73dA415Af2BBCC11f45aeEf7F2cA60222EC736
 
 ## Frontend Configuration Issue
 
