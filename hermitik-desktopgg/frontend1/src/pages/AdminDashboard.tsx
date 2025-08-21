@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
@@ -112,89 +112,65 @@ const AdminDashboard: React.FC = () => {
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
-  // Process data for charts and risk assessment
-  const { chartData, riskMetrics } = useMemo(() => {
-    if (!dashboardData) {
-      return {
-        chartData: { portfolioData: [], apyData: [], categoryData: [] },
-        riskMetrics: null
-      };
-    }
-
-    // Helper function to get category stats
-    const getCategoryStats = (category: string) => {
-      const wallets = dashboardData?.walletCategories?.[category] || [];
-      const totalValue = wallets.reduce((sum: number, wallet: any) => sum + (wallet.totalValue || 0), 0);
-      const totalRewards = wallets.reduce((sum: number, wallet: any) => sum + (wallet.unclaimedRewards || 0), 0);
-      const avgAPY = totalValue > 0 ? (totalRewards / totalValue) * 365 * 100 : 0;
-      
-      return {
-        count: wallets.length,
-        totalValue,
-        totalRewards,
-        avgAPY
-      };
-    };
-
-    const ethStats = getCategoryStats('ethWallets');
-    const stableStats = getCategoryStats('stableWallets');
-    const hybridStats = getCategoryStats('hybridWallets');
-
-    // Portfolio value trend data (mock data for now - can be enhanced with historical data)
-    const portfolioData = [
-      { date: 'Today', totalValue: dashboardData.totalPortfolioValue, ethWallets: ethStats.totalValue, stableWallets: stableStats.totalValue, hybridWallets: hybridStats.totalValue },
-      { date: 'Yesterday', totalValue: dashboardData.totalPortfolioValue * 0.98, ethWallets: ethStats.totalValue * 0.97, stableWallets: stableStats.totalValue * 0.99, hybridWallets: hybridStats.totalValue * 0.98 },
-      { date: '2 days ago', totalValue: dashboardData.totalPortfolioValue * 0.95, ethWallets: ethStats.totalValue * 0.94, stableWallets: stableStats.totalValue * 0.98, hybridWallets: hybridStats.totalValue * 0.96 },
-    ];
-
-    // APY distribution data
-    const apyData = [
-      { range: '0-10%', count: Math.floor(dashboardData.totalWallets * 0.3), totalValue: dashboardData.totalPortfolioValue * 0.2, avgAPY: 5 },
-      { range: '10-50%', count: Math.floor(dashboardData.totalWallets * 0.4), totalValue: dashboardData.totalPortfolioValue * 0.4, avgAPY: 30 },
-      { range: '50-100%', count: Math.floor(dashboardData.totalWallets * 0.2), totalValue: dashboardData.totalPortfolioValue * 0.25, avgAPY: 75 },
-      { range: '100%+', count: Math.floor(dashboardData.totalWallets * 0.1), totalValue: dashboardData.totalPortfolioValue * 0.15, avgAPY: 150 },
-    ];
-
-    // Wallet category data
-    const categoryData = [
-      { name: 'ETH Wallets', value: ethStats.totalValue, color: '#EF4444' },
-      { name: 'Stable Wallets', value: stableStats.totalValue, color: '#3B82F6' },
-      { name: 'Hybrid Wallets', value: hybridStats.totalValue, color: '#8B5CF6' },
-    ];
-
-    // Risk assessment
-    const totalValue = dashboardData.totalPortfolioValue;
-    const ethPercentage = (ethStats.totalValue / totalValue) * 100;
-    const stablePercentage = (stableStats.totalValue / totalValue) * 100;
-    const hybridPercentage = (hybridStats.totalValue / totalValue) * 100;
-
-    let riskLevel = 'Low';
-    let riskScore = 0;
-
-    if (ethPercentage > 60) {
-      riskLevel = 'High';
-      riskScore = 80;
-    } else if (ethPercentage > 30) {
-      riskLevel = 'Medium';
-      riskScore = 50;
-    } else {
-      riskLevel = 'Low';
-      riskScore = 20;
-    }
-
-    const riskMetrics = {
-      riskLevel,
-      riskScore,
-      ethPercentage,
-      stablePercentage,
-      hybridPercentage
-    };
-
+  // Simple helper function to get category stats
+  const getCategoryStats = (category: string) => {
+    const wallets = dashboardData?.walletCategories?.[category] || [];
+    const totalValue = wallets.reduce((sum: number, wallet: any) => sum + (wallet.totalValue || 0), 0);
+    const totalRewards = wallets.reduce((sum: number, wallet: any) => sum + (wallet.unclaimedRewards || 0), 0);
+    const avgAPY = totalValue > 0 ? (totalRewards / totalValue) * 365 * 100 : 0;
+    
     return {
-      chartData: { portfolioData, apyData, categoryData },
-      riskMetrics
+      count: wallets.length,
+      totalValue,
+      totalRewards,
+      avgAPY
     };
-  }, [dashboardData]);
+  };
+
+  // Calculate stats directly
+  const ethStats = getCategoryStats('ethWallets');
+  const stableStats = getCategoryStats('stableWallets');
+  const hybridStats = getCategoryStats('hybridWallets');
+
+  // Calculate risk metrics
+  const totalValue = dashboardData.totalPortfolioValue || 0;
+  const ethPercentage = totalValue > 0 ? (ethStats.totalValue / totalValue) * 100 : 0;
+  const stablePercentage = totalValue > 0 ? (stableStats.totalValue / totalValue) * 100 : 0;
+  const hybridPercentage = totalValue > 0 ? (hybridStats.totalValue / totalValue) * 100 : 0;
+
+  let riskLevel = 'Low';
+  let riskScore = 0;
+
+  if (ethPercentage > 60) {
+    riskLevel = 'High';
+    riskScore = 80;
+  } else if (ethPercentage > 30) {
+    riskLevel = 'Medium';
+    riskScore = 50;
+  } else {
+    riskLevel = 'Low';
+    riskScore = 20;
+  }
+
+  // Prepare chart data
+  const portfolioData = [
+    { date: 'Today', totalValue: totalValue, ethWallets: ethStats.totalValue, stableWallets: stableStats.totalValue, hybridWallets: hybridStats.totalValue },
+    { date: 'Yesterday', totalValue: totalValue * 0.98, ethWallets: ethStats.totalValue * 0.97, stableWallets: stableStats.totalValue * 0.99, hybridWallets: hybridStats.totalValue * 0.98 },
+    { date: '2 days ago', totalValue: totalValue * 0.95, ethWallets: ethStats.totalValue * 0.94, stableWallets: stableStats.totalValue * 0.98, hybridWallets: hybridStats.totalValue * 0.96 },
+  ];
+
+  const apyData = [
+    { range: '0-10%', count: Math.floor((dashboardData.totalWallets || 0) * 0.3), totalValue: totalValue * 0.2, avgAPY: 5 },
+    { range: '10-50%', count: Math.floor((dashboardData.totalWallets || 0) * 0.4), totalValue: totalValue * 0.4, avgAPY: 30 },
+    { range: '50-100%', count: Math.floor((dashboardData.totalWallets || 0) * 0.2), totalValue: totalValue * 0.25, avgAPY: 75 },
+    { range: '100%+', count: Math.floor((dashboardData.totalWallets || 0) * 0.1), totalValue: totalValue * 0.15, avgAPY: 150 },
+  ];
+
+  const categoryData = [
+    { name: 'ETH Wallets', value: ethStats.totalValue, color: '#EF4444' },
+    { name: 'Stable Wallets', value: stableStats.totalValue, color: '#3B82F6' },
+    { name: 'Hybrid Wallets', value: hybridStats.totalValue, color: '#8B5CF6' },
+  ];
 
   return (
     <div className="space-y-6 p-6">
@@ -274,42 +250,40 @@ const AdminDashboard: React.FC = () => {
       </div>
 
       {/* Risk Assessment */}
-      {riskMetrics && (
-        <Card>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Risk Assessment</h3>
-            <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-              riskMetrics.riskLevel === 'High' ? 'bg-red-500/20 text-red-400' :
-              riskMetrics.riskLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
-              'bg-green-500/20 text-green-400'
-            }`}>
-              {riskMetrics.riskLevel} Risk
-            </div>
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Risk Assessment</h3>
+          <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+            riskLevel === 'High' ? 'bg-red-500/20 text-red-400' :
+            riskLevel === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+            'bg-green-500/20 text-green-400'
+          }`}>
+            {riskLevel} Risk
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-red-400">{riskMetrics.ethPercentage.toFixed(1)}%</div>
-              <div className="text-sm text-gray-400">ETH Wallets</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-400">{riskMetrics.stablePercentage.toFixed(1)}%</div>
-              <div className="text-sm text-gray-400">Stable Wallets</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-400">{riskMetrics.hybridPercentage.toFixed(1)}%</div>
-              <div className="text-sm text-gray-400">Hybrid Wallets</div>
-            </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-red-400">{ethPercentage.toFixed(1)}%</div>
+            <div className="text-sm text-gray-400">ETH Wallets</div>
           </div>
-        </Card>
-      )}
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-400">{stablePercentage.toFixed(1)}%</div>
+            <div className="text-sm text-gray-400">Stable Wallets</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-purple-400">{hybridPercentage.toFixed(1)}%</div>
+            <div className="text-sm text-gray-400">Hybrid Wallets</div>
+          </div>
+        </div>
+      </Card>
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <PortfolioValueChart data={chartData.portfolioData} />
-        <WalletCategoryPieChart data={chartData.categoryData} />
+        <PortfolioValueChart data={portfolioData} />
+        <WalletCategoryPieChart data={categoryData} />
       </div>
 
-      <APYDistributionChart data={chartData.apyData} />
+      <APYDistributionChart data={apyData} />
 
       {/* Action Buttons */}
       <div className="flex items-center justify-between">
@@ -324,18 +298,16 @@ const AdminDashboard: React.FC = () => {
           </button>
         </div>
         <div className="flex items-center space-x-2 text-sm">
-          {riskMetrics?.riskLevel === 'High' ? (
+          {riskLevel === 'High' ? (
             <AlertTriangle className="w-4 h-4 text-red-400" />
           ) : (
             <CheckCircle className="w-4 h-4 text-green-400" />
           )}
           <span className="text-gray-400">
-            {riskMetrics?.riskLevel === 'High' ? 'High risk portfolio detected' : 'Portfolio risk level acceptable'}
+            {riskLevel === 'High' ? 'High risk portfolio detected' : 'Portfolio risk level acceptable'}
           </span>
         </div>
       </div>
-
-
     </div>
   );
 };
