@@ -112,23 +112,29 @@ const AdminDashboard: React.FC = () => {
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
-  const getCategoryStats = (category: string) => {
-    const wallets = dashboardData?.walletCategories?.[category] || [];
-    const totalValue = wallets.reduce((sum: number, wallet: any) => sum + (wallet.totalValue || 0), 0);
-    const totalRewards = wallets.reduce((sum: number, wallet: any) => sum + (wallet.unclaimedRewards || 0), 0);
-    const avgAPY = totalValue > 0 ? (totalRewards / totalValue) * 365 * 100 : 0;
-    
-    return {
-      count: wallets.length,
-      totalValue,
-      totalRewards,
-      avgAPY
-    };
-  };
+  // Process data for charts and risk assessment
+  const { chartData, riskMetrics } = useMemo(() => {
+    if (!dashboardData) {
+      return {
+        chartData: { portfolioData: [], apyData: [], categoryData: [] },
+        riskMetrics: null
+      };
+    }
 
-  // Process data for charts
-  const chartData = useMemo(() => {
-    if (!dashboardData) return { portfolioData: [], apyData: [], categoryData: [] };
+    // Helper function to get category stats
+    const getCategoryStats = (category: string) => {
+      const wallets = dashboardData?.walletCategories?.[category] || [];
+      const totalValue = wallets.reduce((sum: number, wallet: any) => sum + (wallet.totalValue || 0), 0);
+      const totalRewards = wallets.reduce((sum: number, wallet: any) => sum + (wallet.unclaimedRewards || 0), 0);
+      const avgAPY = totalValue > 0 ? (totalRewards / totalValue) * 365 * 100 : 0;
+      
+      return {
+        count: wallets.length,
+        totalValue,
+        totalRewards,
+        avgAPY
+      };
+    };
 
     const ethStats = getCategoryStats('ethWallets');
     const stableStats = getCategoryStats('stableWallets');
@@ -156,17 +162,7 @@ const AdminDashboard: React.FC = () => {
       { name: 'Hybrid Wallets', value: hybridStats.totalValue, color: '#8B5CF6' },
     ];
 
-    return { portfolioData, apyData, categoryData };
-  }, [dashboardData]);
-
-  // Risk assessment
-  const riskMetrics = useMemo(() => {
-    if (!dashboardData) return null;
-
-    const ethStats = getCategoryStats('ethWallets');
-    const stableStats = getCategoryStats('stableWallets');
-    const hybridStats = getCategoryStats('hybridWallets');
-
+    // Risk assessment
     const totalValue = dashboardData.totalPortfolioValue;
     const ethPercentage = (ethStats.totalValue / totalValue) * 100;
     const stablePercentage = (stableStats.totalValue / totalValue) * 100;
@@ -186,12 +182,17 @@ const AdminDashboard: React.FC = () => {
       riskScore = 20;
     }
 
-    return {
+    const riskMetrics = {
       riskLevel,
       riskScore,
       ethPercentage,
       stablePercentage,
       hybridPercentage
+    };
+
+    return {
+      chartData: { portfolioData, apyData, categoryData },
+      riskMetrics
     };
   }, [dashboardData]);
 
