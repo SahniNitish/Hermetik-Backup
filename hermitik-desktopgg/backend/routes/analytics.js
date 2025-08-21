@@ -17,6 +17,9 @@ const PositionHistory = require('../models/PositionHistory');
 // Import APY calculation service
 const APYCalculationService = require('../services/apyCalculationService');
 
+// Import Admin analytics service
+const AdminAnalyticsService = require('../services/adminAnalyticsService');
+
 // Import wallet processing utilities
 const {
   fetchTokens,
@@ -1964,5 +1967,104 @@ router.get('/positions/history/:debankPositionId', auth, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ========================================
+// ADMIN DASHBOARD ENDPOINTS
+// ========================================
+
+// Get admin dashboard overview data
+router.get('/admin/dashboard', auth, catchAsync(async (req, res) => {
+  // Admin access check
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  console.log('🔐 ADMIN: Dashboard endpoint called');
+  
+  try {
+    const dashboardData = await AdminAnalyticsService.getAdminDashboardData();
+    
+    res.json({
+      success: true,
+      data: dashboardData,
+      message: 'Admin dashboard data retrieved successfully',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ ADMIN: Error getting dashboard data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}));
+
+// Get categorized wallets (ETH, Stable, Hybrid)
+router.get('/admin/wallets/:category', auth, catchAsync(async (req, res) => {
+  // Admin access check
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  const { category } = req.params;
+  const validCategories = ['ethWallets', 'stableWallets', 'hybridWallets', 'all'];
+  
+  if (!validCategories.includes(category)) {
+    return res.status(400).json({ error: 'Invalid category. Must be: ethWallets, stableWallets, hybridWallets, or all' });
+  }
+  
+  console.log(`🔐 ADMIN: Getting ${category} wallets`);
+  
+  try {
+    const walletData = await AdminAnalyticsService.getCategorizedWallets(category);
+    
+    res.json({
+      success: true,
+      data: walletData,
+      category: category,
+      message: `${category} data retrieved successfully`,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error(`❌ ADMIN: Error getting ${category} wallets:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}));
+
+// Get user performance ranking
+router.get('/admin/users/ranking', auth, catchAsync(async (req, res) => {
+  // Admin access check
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  console.log('🔐 ADMIN: Getting user performance ranking');
+  
+  try {
+    const userRanking = await AdminAnalyticsService.getUserPerformanceRanking();
+    
+    res.json({
+      success: true,
+      data: userRanking,
+      message: 'User performance ranking retrieved successfully',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ ADMIN: Error getting user ranking:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+}));
 
 module.exports = router;

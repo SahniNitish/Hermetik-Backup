@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics';
 import NAVCalculator from './pages/NAVCalculator';
 import Users from './pages/Users';
 import Settings from './pages/Settings';
+import AdminDashboard from './pages/AdminDashboard';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 
@@ -39,6 +40,7 @@ const AppRoutes: React.FC = () => {
         <Route path="nav-calculator" element={<NAVCalculator />} />
         <Route path="positions" element={<Positions />} />
         <Route path="users" element={<Users />} />
+        <Route path="admin" element={<AdminDashboard />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

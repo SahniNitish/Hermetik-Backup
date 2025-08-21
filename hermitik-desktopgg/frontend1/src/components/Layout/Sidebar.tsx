@@ -10,7 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
-  Calculator
+  Calculator,
+  Shield
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useUserView } from '../../contexts/UserViewContext';
@@ -31,7 +32,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     { icon: BarChart3, label: 'Analytics', path: '/analytics' },
     { icon: Calculator, label: 'NAV Calculator', path: '/nav-calculator' },
     { icon: TrendingUp, label: 'Positions', path: '/positions' },
-    ...(user?.role === 'admin' ? [{ icon: Users, label: 'Users', path: '/users' }] : []),
+    ...(user?.role === 'admin' ? [
+      { icon: Users, label: 'Users', path: '/users' },
+      { icon: Shield, label: 'Admin Dashboard', path: '/admin' }
+    ] : []),
     { icon: Settings, label: 'Settings', path: '/settings' },
   ];
 
