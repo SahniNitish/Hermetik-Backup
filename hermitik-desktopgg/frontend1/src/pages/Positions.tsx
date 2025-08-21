@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { walletApi } from '../services/api';
 import { TrendingUp, TrendingDown, BarChart3 } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Protocol, Wallet } from '../types';
 const Positions: React.FC = () => {
 
   const { viewedUser } = useUserView();
+  // Remove time period selector - using consecutive day APY calculation
 
   const { data: wallets, isLoading, error } = useQuery<Wallet[]>({
     queryKey: ['wallets', viewedUser?.id],
@@ -34,8 +35,13 @@ const Positions: React.FC = () => {
       console.log('🔥 Wallets available:', !!wallets, 'Count:', wallets?.length || 0);
       
       try {
-        const url = `${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy`;
-        console.log('🔥 FRONTEND: Fetching from URL:', url);
+        const params = new URLSearchParams();
+        params.append('period', '1');
+        if (viewedUser?.id) {
+          params.append('userId', viewedUser.id);
+        }
+        const url = `${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy?${params.toString()}`;
+        console.log('🔥 FRONTEND: Fetching APY data for consecutive day calculation', viewedUser?.id ? `for user ${viewedUser.id}` : '');
         
         const response = await fetch(url, {
           headers: {
@@ -179,10 +185,10 @@ const Positions: React.FC = () => {
 
   // Create APY lookup map
   const apyLookup = new Map();
-  if (positionAPYs?.success && positionAPYs.positions) {
+  if (positionAPYs?.success && positionAPYs.data?.positions) {
     console.log('🔥 FRONTEND: Creating APY lookup map...');
-    console.log('🔥 FRONTEND: Available APY position IDs:', Object.keys(positionAPYs.positions));
-    Object.entries(positionAPYs.positions).forEach(([positionId, apyData]) => {
+    console.log('🔥 FRONTEND: Available APY position IDs:', Object.keys(positionAPYs.data.positions));
+    Object.entries(positionAPYs.data.positions).forEach(([positionId, apyData]) => {
       console.log(`🔥 FRONTEND: Adding to lookup: ${positionId}`, apyData);
       apyLookup.set(positionId, apyData);
     });
@@ -191,7 +197,7 @@ const Positions: React.FC = () => {
     console.log('🔥 FRONTEND: No APY data available for lookup:', {
       hasPositionAPYs: !!positionAPYs,
       success: positionAPYs?.success,
-      hasPositions: !!positionAPYs?.positions
+      hasPositions: !!positionAPYs?.data?.positions
     });
   }
 
@@ -247,7 +253,36 @@ const Positions: React.FC = () => {
     chain: string
   }) => {
     const positionId = generatePositionId(protocolName, chain);
-    const apyData = apyLookup.get(positionId);
+    let apyData = apyLookup.get(positionId);
+    
+    // Fallback: try multiple position ID formats to match backend
+    if (!apyData) {
+      // Try the exact format we see in console: uniswap_v3_eth_base_uniswap3
+      const fallbackId1 = `${protocolName.toLowerCase().replace(/\s+/g, '_')}_${chain.toLowerCase()}_base_${protocolName.toLowerCase().replace(/\s+/g, '_').replace('uniswap_v3', 'uniswap3')}`;
+      apyData = apyLookup.get(fallbackId1);
+      console.log(`🔄 APY FALLBACK 1: Trying ${fallbackId1}`, { found: !!apyData });
+      
+      if (!apyData) {
+        // Try with original protocol name
+        const fallbackId2 = `${protocolName.toLowerCase().replace(/\s+/g, '_')}_${chain.toLowerCase()}_base_${protocolName.toLowerCase().replace(/\s+/g, '_')}`;
+        apyData = apyLookup.get(fallbackId2);
+        console.log(`🔄 APY FALLBACK 2: Trying ${fallbackId2}`, { found: !!apyData });
+      }
+      
+      if (!apyData) {
+        // Try the format from test results
+        const fallbackId3 = `${protocolName.toLowerCase().replace(/\s+/g, '_')}_${chain.toLowerCase()}_other__${protocolName.toLowerCase().replace(/\s+/g, '_').replace('uniswap_v3', 'uniswap3')}`;
+        apyData = apyLookup.get(fallbackId3);
+        console.log(`🔄 APY FALLBACK 3: Trying ${fallbackId3}`, { found: !!apyData });
+      }
+      
+      if (!apyData) {
+        // Try simpler format
+        const fallbackId4 = `${protocolName.toLowerCase().replace(/\s+/g, '_')}_${chain.toLowerCase()}_${protocolName.toLowerCase().replace(/\s+/g, '_').replace('uniswap_v3', 'uniswap3')}`;
+        apyData = apyLookup.get(fallbackId4);
+        console.log(`🔄 APY FALLBACK 4: Trying ${fallbackId4}`, { found: !!apyData });
+      }
+    }
     
     console.log(`🔥 APY LOOKUP: ${protocolName} > ${chain}`, {
       protocolName,
@@ -404,8 +439,11 @@ const Positions: React.FC = () => {
       <AdminViewBanner />
       
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2 font-heading">DeFi Positions</h1>
-        <p className="text-gray-400">Your current DeFi positions across all protocols</p>
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2 font-heading">DeFi Positions</h1>
+          <p className="text-gray-400">Your current DeFi positions across all protocols</p>
+        </div>
+        <p className="text-sm text-gray-500">APY calculations based on consecutive day analysis</p>
       </div>
 
       {/* Protocol Positions Display */}

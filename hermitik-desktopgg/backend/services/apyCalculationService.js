@@ -16,43 +16,44 @@ class APYCalculationService {
    * Calculate APY for all positions for a user
    * @param {string} userId - User ID
    * @param {Date} targetDate - Date to calculate APY for (defaults to today)
+   * @param {number} periodDays - Number of days to calculate APY over (defaults to 30)
    * @returns {Object} - Object with position APYs
    */
-  static async calculateAllPositionAPYs(userId, targetDate = new Date()) {
-    console.log(`📊 Calculating APYs for user: ${userId} on ${targetDate.toISOString().split('T')[0]}`);
+  static async calculateAllPositionAPYs(userId, targetDate = new Date(), periodDays = 30) {
+    console.log(`📊 Calculating APYs for user: ${userId} on ${targetDate.toISOString().split('T')[0]} over ${periodDays} days`);
     
     try {
-      // Get today's snapshot (or target date snapshot)
-      const todaySnapshot = await this.getTodaySnapshot(userId, targetDate);
-      if (!todaySnapshot) {
+      // Get current snapshot (or target date snapshot)
+      const currentSnapshot = await this.getTodaySnapshot(userId, targetDate);
+      if (!currentSnapshot) {
         console.log('❌ No snapshot found for target date');
         return {};
       }
 
-      // Get yesterday's snapshot
-      const yesterdaySnapshot = await this.getYesterdaySnapshot(userId, targetDate);
+      // Get historical snapshots for the specified period
+      const historicalSnapshots = await this.getHistoricalSnapshots(userId, targetDate, periodDays);
       
-      console.log(`📈 Today's snapshot: ${todaySnapshot.positions?.length || 0} positions`);
-      console.log(`📉 Yesterday's snapshot: ${yesterdaySnapshot?.positions?.length || 0} positions`);
+      console.log(`📈 Current snapshot: ${currentSnapshot.positions?.length || 0} positions`);
+      console.log(`📉 Historical snapshots: ${historicalSnapshots.length} snapshots over ${periodDays} days`);
 
       const apyResults = {};
 
-      // Process each position in today's snapshot
-      for (const position of (todaySnapshot.positions || [])) {
+      // Process each position in current snapshot
+      for (const position of (currentSnapshot.positions || [])) {
         const positionId = this.generatePositionId(position);
         
         console.log(`🧮 Calculating APY for position: ${positionId}`);
         
-        const apyData = await this.calculatePositionAPY(
+        const apyData = await this.calculatePositionAPYOverPeriod(
           position,
-          yesterdaySnapshot,
-          todaySnapshot.date,
-          yesterdaySnapshot?.date
+          historicalSnapshots,
+          periodDays,
+          positionId
         );
         
         if (apyData) {
           apyResults[positionId] = apyData;
-          console.log(`✅ APY calculated for ${positionId}: ${apyData.apy?.toFixed(2) || 'N/A'}%`);
+          console.log(`✅ APY calculated for ${positionId}: ${apyData.apy?.toFixed(2) || 'N/A'}% over ${periodDays} days`);
         }
       }
 
@@ -304,71 +305,179 @@ class APYCalculationService {
     const endOfDay = new Date(targetDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const snapshot = await DailySnapshot.findOne({
+    // Get all snapshots for today
+    const todaySnapshots = await DailySnapshot.find({
       userId,
       date: { $gte: startOfDay, $lte: endOfDay }
     }).sort({ date: -1 });
 
-    if (!snapshot) {
-      // If no snapshot for exact date, get the most recent one before target date
-      const fallbackSnapshots = await DailySnapshot.find({
-        userId,
-        date: { $lte: targetDate }
-      }).sort({ date: -1 }).limit(10);
-
-      // Find the first snapshot with positions or positive value
-      for (const fallbackSnapshot of fallbackSnapshots) {
-        if ((fallbackSnapshot.positions && fallbackSnapshot.positions.length > 0) || 
-            (fallbackSnapshot.totalNavUsd && fallbackSnapshot.totalNavUsd > 0)) {
-          return fallbackSnapshot;
+    if (todaySnapshots.length > 0) {
+      console.log(`🔍 Found ${todaySnapshots.length} snapshots for today, checking for values...`);
+      
+      // Prioritize snapshots with actual position values
+      for (const snapshot of todaySnapshots) {
+        console.log(`🔍 Checking snapshot: ${snapshot.date} with ${snapshot.positions?.length || 0} positions`);
+        
+        const hasPositionsWithValue = snapshot.positions && snapshot.positions.some(pos => 
+          pos.totalUsdValue > 0 || 
+          (pos.supplyTokens && pos.supplyTokens.some(token => (token.usdValue || (token.amount * token.price)) > 0)) ||
+          (pos.rewardTokens && pos.rewardTokens.some(token => (token.usdValue || (token.amount * token.price)) > 0))
+        );
+        
+        console.log(`🔍 Snapshot ${snapshot.date} has positions with values: ${hasPositionsWithValue}`);
+        
+        if (hasPositionsWithValue) {
+          console.log(`✅ Found snapshot with positions having values: ${snapshot.date}`);
+          return snapshot;
         }
       }
-
-      // If no snapshot with positions found, return the most recent one
-      return fallbackSnapshots[0] || null;
+      
+      // If no snapshots with values, return the first one
+      console.log(`⚠️ No snapshots with position values found, using first available: ${todaySnapshots[0]?.date}`);
+      return todaySnapshots[0];
     }
 
-    return snapshot;
+    // If no snapshot for exact date, get the most recent one before target date
+    const fallbackSnapshots = await DailySnapshot.find({
+      userId,
+      date: { $lte: targetDate }
+    }).sort({ date: -1 }).limit(10);
+
+    // Find the first snapshot with positions or positive value
+    for (const fallbackSnapshot of fallbackSnapshots) {
+      if ((fallbackSnapshot.positions && fallbackSnapshot.positions.length > 0) || 
+          (fallbackSnapshot.totalNavUsd && fallbackSnapshot.totalNavUsd > 0)) {
+        return fallbackSnapshot;
+      }
+    }
+
+    // If no snapshot with positions found, return the most recent one
+    return fallbackSnapshots[0] || null;
   }
 
   /**
-   * Get yesterday's snapshot
+   * Get historical snapshots for a specified period
    */
-  static async getYesterdaySnapshot(userId, targetDate) {
-    const yesterday = new Date(targetDate);
-    yesterday.setDate(yesterday.getDate() - 1);
+  static async getHistoricalSnapshots(userId, targetDate, periodDays) {
+    const endDate = new Date(targetDate);
+    const startDate = new Date(targetDate);
+    startDate.setDate(startDate.getDate() - periodDays);
     
-    const startOfYesterday = new Date(yesterday);
-    startOfYesterday.setHours(0, 0, 0, 0);
+    console.log(`🔍 Fetching snapshots from ${startDate.toISOString()} to ${endDate.toISOString()}`);
     
-    const endOfYesterday = new Date(yesterday);
-    endOfYesterday.setHours(23, 59, 59, 999);
-
-    const snapshot = await DailySnapshot.findOne({
+    const snapshots = await DailySnapshot.find({
       userId,
-      date: { $gte: startOfYesterday, $lte: endOfYesterday }
-    }).sort({ date: -1 });
+      date: { $gte: startDate, $lte: endDate }
+    }).sort({ date: 1 }); // Sort by date ascending for chronological order
+    
+    console.log(`📊 Found ${snapshots.length} snapshots over ${periodDays} days`);
+    
+    return snapshots;
+  }
 
-    if (!snapshot) {
-      // If no snapshot for exact yesterday, get the most recent one before yesterday
-      const fallbackSnapshots = await DailySnapshot.find({
-        userId,
-        date: { $lt: startOfYesterday }
-      }).sort({ date: -1 }).limit(10);
-
-      // Find the first snapshot with positions or positive value
-      for (const fallbackSnapshot of fallbackSnapshots) {
-        if ((fallbackSnapshot.positions && fallbackSnapshot.positions.length > 0) || 
-            (fallbackSnapshot.totalNavUsd && fallbackSnapshot.totalNavUsd > 0)) {
-          return fallbackSnapshot;
+  /**
+   * Calculate APY for a position over a specified period
+   */
+  static async calculatePositionAPYOverPeriod(currentPosition, historicalSnapshots, periodDays, positionId) {
+    try {
+      // Calculate current value and unclaimed rewards
+      const currentValue = this.calculatePositionValue(currentPosition);
+      const unclaimedRewards = this.calculateUnclaimedRewards(currentPosition);
+      
+      if (currentValue <= 0) {
+        console.log(`⚠️ Position ${positionId} has no value, skipping APY calculation`);
+        return null;
+      }
+      
+      console.log(`🔍 Position ${positionId}: Current value $${currentValue.toFixed(2)}, Unclaimed rewards $${unclaimedRewards.toFixed(2)}`);
+      
+      // RULE 1: Check if position existed yesterday (consecutive days rule)
+      const yesterdaySnapshot = this.findYesterdaySnapshot(historicalSnapshots);
+      const yesterdayPosition = yesterdaySnapshot ? this.findPositionInSnapshot(positionId, yesterdaySnapshot) : null;
+      
+      if (!yesterdayPosition) {
+        console.log(`🔄 Position ${positionId} didn't exist yesterday - treating as NEW position`);
+        
+        // RULE 2: New position - calculate APY based on unclaimed rewards
+        if (unclaimedRewards > 0) {
+          console.log(`💰 Calculating NEW position APY for ${positionId} with $${unclaimedRewards.toFixed(2)} unclaimed rewards`);
+          
+          // APY = (unclaimed_rewards / position_value) * 365
+          const baseValue = currentValue - unclaimedRewards; // Exclude rewards from base value
+          const rewardsPercent = baseValue > 0 ? (unclaimedRewards / baseValue) * 100 : 0;
+          const annualizedAPY = rewardsPercent * 365; // Assume 1 day old
+          
+          console.log(`📊 NEW Position APY calculation:`);
+          console.log(`   Base value: $${baseValue.toFixed(2)}`);
+          console.log(`   Unclaimed rewards: $${unclaimedRewards.toFixed(2)}`);
+          console.log(`   Rewards %: ${rewardsPercent.toFixed(4)}%`);
+          console.log(`   Annualized APY: ${annualizedAPY.toFixed(2)}%`);
+          
+          return {
+            apy: Math.round(annualizedAPY * 100) / 100,
+            periodReturn: Math.round(rewardsPercent * 100) / 100,
+            days: 1, // Assume 1 day old
+            isNewPosition: true,
+            calculationMethod: 'new_position_rewards_based',
+            currentValue: currentValue,
+            baseValue: baseValue,
+            unclaimedRewards: unclaimedRewards,
+            confidence: 'medium',
+            notes: `NEW position with $${unclaimedRewards.toFixed(2)} unclaimed rewards (assumed 1 day old)`,
+            periodDays: periodDays
+          };
+        } else {
+          console.log(`⚠️ NEW position ${positionId} has no unclaimed rewards`);
+          return {
+            apy: 0,
+            periodReturn: 0,
+            days: 1,
+            isNewPosition: true,
+            calculationMethod: 'new_position_no_rewards',
+            currentValue: currentValue,
+            unclaimedRewards: 0,
+            confidence: 'low',
+            notes: `NEW position - no unclaimed rewards (assumed 1 day old)`,
+            periodDays: periodDays
+          };
         }
       }
-
-      // If no snapshot with positions found, return the most recent one
-      return fallbackSnapshots[0] || null;
+      
+      // RULE 1: Position exists yesterday - calculate consecutive APY
+      console.log(`✅ Position ${positionId} exists yesterday - calculating consecutive APY`);
+      
+      const yesterdayValue = this.calculatePositionValue(yesterdayPosition);
+      const valueChange = currentValue - yesterdayValue;
+      const valueChangePercent = yesterdayValue > 0 ? (valueChange / yesterdayValue) : 0;
+      
+      // Annualize the 1-day return
+      const annualizedReturn = yesterdayValue > 0 ? 
+        (Math.pow(1 + valueChangePercent, 365) - 1) * 100 : 0;
+      
+      console.log(`📈 Consecutive APY calculation:`);
+      console.log(`   Yesterday value: $${yesterdayValue.toFixed(2)}`);
+      console.log(`   Today value: $${currentValue.toFixed(2)}`);
+      console.log(`   Value change: $${valueChange.toFixed(2)} (${valueChangePercent.toFixed(4)})`);
+      console.log(`   Annualized APY: ${annualizedReturn.toFixed(2)}%`);
+      
+      return {
+        apy: Math.round(annualizedReturn * 100) / 100,
+        periodReturn: Math.round(valueChangePercent * 10000) / 100,
+        days: 1, // Consecutive day calculation
+        isNewPosition: false,
+        calculationMethod: 'consecutive_day_value_change',
+        currentValue: currentValue,
+        previousValue: yesterdayValue,
+        valueChange: valueChange,
+        confidence: this.assessConfidence(annualizedReturn, false),
+        notes: `Consecutive day value change`,
+        periodDays: periodDays
+      };
+      
+    } catch (error) {
+      console.error('❌ Error calculating position APY over period:', error);
+      return null;
     }
-
-    return snapshot;
   }
 
   /**
@@ -402,6 +511,31 @@ class APYCalculationService {
   }
 
   /**
+   * Calculate total value of a position from its tokens
+   */
+  static calculatePositionValue(position) {
+    const positionData = position._doc || position;
+    
+    // Try direct value first
+    const directValue = positionData.totalUsdValue || positionData.totalValue || positionData.value || positionData.assetUsdValue || 0;
+    if (directValue > 0) return directValue;
+    
+    // Calculate from supply tokens
+    const supplyTokensValue = (positionData.supplyTokens || []).reduce((sum, token) => {
+      const tokenValue = token.usdValue || token.usd_value || (token.amount * token.price) || 0;
+      return sum + tokenValue;
+    }, 0);
+    
+    // Calculate from reward tokens
+    const rewardTokensValue = (positionData.rewardTokens || []).reduce((sum, token) => {
+      const tokenValue = token.usdValue || token.usd_value || (token.amount * token.price) || 0;
+      return sum + tokenValue;
+    }, 0);
+    
+    return supplyTokensValue + rewardTokensValue;
+  }
+
+  /**
    * Calculate total unclaimed rewards value for a position
    */
   static calculateUnclaimedRewards(position) {
@@ -410,8 +544,89 @@ class APYCalculationService {
     }
 
     return position.rewardTokens.reduce((total, reward) => {
-      return total + (reward.usdValue || 0);
+      // Try multiple ways to get the reward value
+      const rewardValue = reward.usdValue || reward.usd_value || (reward.amount * reward.price) || 0;
+      return total + rewardValue;
     }, 0);
+  }
+
+  /**
+   * Find yesterday's snapshot from historical snapshots
+   */
+  static findYesterdaySnapshot(historicalSnapshots) {
+    if (!historicalSnapshots || historicalSnapshots.length === 0) {
+      return null;
+    }
+    
+    // Get yesterday's date
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStart = new Date(yesterday);
+    yesterdayStart.setHours(0, 0, 0, 0);
+    const yesterdayEnd = new Date(yesterday);
+    yesterdayEnd.setHours(23, 59, 59, 999);
+    
+    // Find snapshots from yesterday
+    const yesterdaySnapshots = historicalSnapshots.filter(snapshot => {
+      const snapshotDate = new Date(snapshot.date);
+      return snapshotDate >= yesterdayStart && snapshotDate <= yesterdayEnd;
+    });
+    
+    // Return the most recent snapshot from yesterday
+    if (yesterdaySnapshots.length > 0) {
+      return yesterdaySnapshots.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    }
+    
+    return null;
+  }
+
+  /**
+   * Calculate APY based on unclaimed rewards
+   */
+  static calculateRewardsBasedAPY(position, unclaimedRewards, periodDays) {
+    try {
+      const positionData = position._doc || position;
+      
+      // Calculate the base value (supply tokens only, excluding rewards)
+      const supplyTokensValue = (positionData.supplyTokens || []).reduce((sum, token) => {
+        const tokenValue = token.usdValue || (token.amount * token.price) || 0;
+        return sum + tokenValue;
+      }, 0);
+      
+      if (supplyTokensValue <= 0) {
+        console.log(`⚠️ No supply tokens value for rewards-based APY calculation`);
+        return null;
+      }
+      
+      // Calculate rewards as a percentage of the base value
+      const rewardsPercent = (unclaimedRewards / supplyTokensValue) * 100;
+      
+      // Annualize the rewards percentage
+      const annualizedRewardsAPY = (rewardsPercent / periodDays) * 365;
+      
+      console.log(`💰 Rewards APY calculation:`);
+      console.log(`   Supply value: $${supplyTokensValue.toFixed(2)}`);
+      console.log(`   Unclaimed rewards: $${unclaimedRewards.toFixed(2)}`);
+      console.log(`   Rewards %: ${rewardsPercent.toFixed(4)}%`);
+      console.log(`   Annualized APY: ${annualizedRewardsAPY.toFixed(2)}%`);
+      
+      return {
+        apy: Math.round(annualizedRewardsAPY * 100) / 100,
+        periodReturn: Math.round(rewardsPercent * 100) / 100,
+        days: periodDays,
+        isNewPosition: false,
+        calculationMethod: 'rewards_based',
+        currentValue: supplyTokensValue + unclaimedRewards,
+        baseValue: supplyTokensValue,
+        unclaimedRewards: unclaimedRewards,
+        confidence: this.assessConfidence(annualizedRewardsAPY, false),
+        notes: `Based on $${unclaimedRewards.toFixed(2)} unclaimed rewards`
+      };
+      
+    } catch (error) {
+      console.error('❌ Error calculating rewards-based APY:', error);
+      return null;
+    }
   }
 
   /**

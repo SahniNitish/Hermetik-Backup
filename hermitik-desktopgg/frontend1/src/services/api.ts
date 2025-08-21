@@ -243,9 +243,14 @@ const realAnalyticsApi = {
     return response.data;
   },
 
-  getPositionAPYs: async (): Promise<any> => {
-    console.log('🔥 API: Fetching position APYs from real backend...');
-    const response = await api.get('/analytics/positions/apy');
+  getPositionAPYs: async (period: number = 30, userId?: string): Promise<any> => {
+    console.log(`🔥 API: Fetching position APYs from real backend for ${period} days${userId ? ` for user ${userId}` : ''}...`);
+    const params = new URLSearchParams();
+    params.append('period', period.toString());
+    if (userId) {
+      params.append('userId', userId);
+    }
+    const response = await api.get(`/analytics/positions/apy?${params.toString()}`);
     console.log('🔥 API: APY response received:', response.data);
     return response.data;
   },

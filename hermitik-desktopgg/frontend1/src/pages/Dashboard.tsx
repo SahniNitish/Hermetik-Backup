@@ -14,6 +14,7 @@ const Dashboard: React.FC = () => {
   const { viewedUser, isViewingAsAdmin } = useUserView();
   const [exportingNav, setExportingNav] = useState(false);
   const [error, setError] = useState('');
+  // Remove time period selector - using consecutive day APY calculation
   
   console.log('🔍 Dashboard: viewedUser:', viewedUser);
   console.log('🔍 Dashboard: isViewingAsAdmin:', isViewingAsAdmin);
@@ -35,7 +36,8 @@ const Dashboard: React.FC = () => {
     queryKey: ['positionAPYs', viewedUser?.id],
     queryFn: async () => {
       try {
-        const data = await analyticsApi.getPositionAPYs();
+        // Pass viewedUser.id when admin is viewing another user's profile
+        const data = await analyticsApi.getPositionAPYs(1, viewedUser?.id); // Use 1 day for consecutive calculation
         console.log('🔥 DASHBOARD: APY data received:', data);
         return data;
       } catch (error) {
@@ -52,8 +54,9 @@ const Dashboard: React.FC = () => {
   console.log('Dashboard: APY state:', { positionAPYs, apyLoading, apyError });
   console.log('🔥 DASHBOARD: Full APY object:', JSON.stringify(positionAPYs, null, 2));
   console.log('🔥 DASHBOARD: APY success?', positionAPYs?.success);
-  console.log('🔥 DASHBOARD: APY positions?', positionAPYs?.positions);
-  console.log('🔥 DASHBOARD: APY positions keys:', positionAPYs?.positions ? Object.keys(positionAPYs.positions) : 'NO POSITIONS');
+  console.log('🔥 DASHBOARD: APY positions?', positionAPYs?.data?.positions);
+  console.log('🔥 DASHBOARD: APY positions keys:', positionAPYs?.data?.positions ? Object.keys(positionAPYs.data.positions) : 'NO POSITIONS');
+  console.log('🔥 DASHBOARD: APY calculation method:', positionAPYs?.data?.positions ? Object.values(positionAPYs.data.positions)[0]?.calculationMethod : 'N/A');
 
   if (isLoading || apyLoading) {
     return (
@@ -538,6 +541,12 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
+          {/* APY Analysis Header */}
+          <div className="col-span-full mb-4">
+            <h3 className="text-lg font-semibold text-white">APY Analysis</h3>
+            <p className="text-sm text-gray-400">Based on consecutive day calculations</p>
+          </div>
+
           {/* Average APY */}
           <div className="card-hermetik p-4">
             <div className="flex items-center justify-between">
@@ -548,11 +557,11 @@ const Dashboard: React.FC = () => {
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-hermetik-gold"></div>
                     <p className="text-sm text-gray-400">Loading...</p>
                   </div>
-                ) : positionAPYs?.success && positionAPYs.positions ? (
+                ) : positionAPYs?.success && positionAPYs.data?.positions ? (
                   <>
                     <p className="text-xl font-bold text-hermetik-gold">
                       {(() => {
-                        const apyValues = Object.values(positionAPYs.positions)
+                        const apyValues = Object.values(positionAPYs.data.positions)
                           .filter((apy: any) => apy.apy !== null && apy.apy !== undefined)
                           .map((apy: any) => apy.apy);
                         const avgApy = apyValues.length > 0 
@@ -562,7 +571,14 @@ const Dashboard: React.FC = () => {
                       })()}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {Object.keys(positionAPYs.positions).length} positions
+                      {Object.keys(positionAPYs.data.positions).length} positions
+                    </p>
+                    <p className="text-xs text-blue-400">
+                      {(() => {
+                        const positions = Object.values(positionAPYs.data.positions);
+                        const hasValidApy = positions.some((pos: any) => pos.apy > 0);
+                        return hasValidApy ? '✅ APY calculated' : '⚠️ No historical data';
+                      })()}
                     </p>
                   </>
                 ) : (
@@ -577,6 +593,7 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
 
 
       {/* Wallets Overview */}

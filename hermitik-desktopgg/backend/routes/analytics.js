@@ -1770,17 +1770,19 @@ router.get('/portfolio/apy-performance', auth, async (req, res) => {
 
 // Get APY calculations for all user positions - WORKING VERSION
 router.get('/positions/apy', auth, catchAsync(async (req, res) => {
-  const userId = req.user.id;
+  // Use userId from query params if provided (for admin viewing other users), otherwise use authenticated user's ID
+  const userId = req.query.userId || req.user.id;
   const targetDate = req.query.targetDate;
+  const period = parseInt(req.query.period) || 30; // Default to 30 days
   
-  console.log(`🔥 APY ENDPOINT CALLED for user: ${userId}`);
+  console.log(`🔥 APY ENDPOINT CALLED for user: ${userId} with period: ${period} days`);
   
   try {
     const targetDateTime = targetDate ? new Date(targetDate) : new Date();
     
-    // Get APY calculations directly from service
-    const apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime);
-    console.log(`🔥 APY Service returned ${Object.keys(apyResults).length} positions`);
+    // Get APY calculations directly from service with period
+    const apyResults = await APYCalculationService.calculateAllPositionAPYs(userId, targetDateTime, period);
+    console.log(`🔥 APY Service returned ${Object.keys(apyResults).length} positions over ${period} days`);
     
     // Format results for frontend
     const formattedResults = {};
@@ -1800,10 +1802,11 @@ router.get('/positions/apy', auth, catchAsync(async (req, res) => {
       data: {
         userId,
         targetDate: targetDateTime,
+        period: period,
         positions: formattedResults,
         positionCount: Object.keys(formattedResults).length
       },
-      message: 'APY calculations retrieved successfully',
+      message: `APY calculations retrieved successfully for ${period}-day period`,
       timestamp: new Date().toISOString()
     });
     
