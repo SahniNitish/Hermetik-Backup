@@ -126,13 +126,13 @@ const AdminDashboard: React.FC = () => {
     };
   };
 
-  const ethStats = getCategoryStats('ethWallets');
-  const stableStats = getCategoryStats('stableWallets');
-  const hybridStats = getCategoryStats('hybridWallets');
-
   // Process data for charts
   const chartData = useMemo(() => {
     if (!dashboardData) return { portfolioData: [], apyData: [], categoryData: [] };
+
+    const ethStats = getCategoryStats('ethWallets');
+    const stableStats = getCategoryStats('stableWallets');
+    const hybridStats = getCategoryStats('hybridWallets');
 
     // Portfolio value trend data (mock data for now - can be enhanced with historical data)
     const portfolioData = [
@@ -157,11 +157,15 @@ const AdminDashboard: React.FC = () => {
     ];
 
     return { portfolioData, apyData, categoryData };
-  }, [dashboardData, ethStats, stableStats, hybridStats]);
+  }, [dashboardData]);
 
   // Risk assessment
   const riskMetrics = useMemo(() => {
     if (!dashboardData) return null;
+
+    const ethStats = getCategoryStats('ethWallets');
+    const stableStats = getCategoryStats('stableWallets');
+    const hybridStats = getCategoryStats('hybridWallets');
 
     const totalValue = dashboardData.totalPortfolioValue;
     const ethPercentage = (ethStats.totalValue / totalValue) * 100;
@@ -189,7 +193,7 @@ const AdminDashboard: React.FC = () => {
       stablePercentage,
       hybridPercentage
     };
-  }, [dashboardData, ethStats, stableStats, hybridStats]);
+  }, [dashboardData]);
 
   return (
     <div className="space-y-6">
