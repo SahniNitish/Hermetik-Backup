@@ -197,7 +197,7 @@ const AdminDashboard: React.FC = () => {
   }, [dashboardData]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -209,6 +209,18 @@ const AdminDashboard: React.FC = () => {
           <span>Last updated: {new Date().toLocaleTimeString()}</span>
         </div>
       </div>
+
+      {/* Debug Info - Show first to help troubleshoot */}
+      <Card>
+        <h3 className="text-lg font-semibold text-white mb-4">Debug Information</h3>
+        <div className="space-y-2 text-sm">
+          <p className="text-gray-400">Dashboard Data: {dashboardData ? 'Loaded' : 'Not loaded'}</p>
+          <p className="text-gray-400">Dashboard Data Keys: {Object.keys(dashboardData || {}).join(', ')}</p>
+          <p className="text-gray-400">Wallet Categories: {Object.keys(dashboardData?.walletCategories || {}).join(', ')}</p>
+          <p className="text-gray-400">User Performance Count: {dashboardData?.userPerformance?.length || 0}</p>
+          <p className="text-gray-400">Total Portfolio Value: {dashboardData?.totalPortfolioValue || 'N/A'}</p>
+        </div>
+      </Card>
 
       {/* Portfolio Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -253,7 +265,7 @@ const AdminDashboard: React.FC = () => {
             <div>
               <p className="text-sm text-gray-400">Average APY</p>
               <p className="text-2xl font-bold text-hermetik-gold">
-                {formatPercentage(dashboardData.portfolioMetrics?.averageAPY || 0)}
+                {formatPercentage(dashboardData.averageAPY || 0)}
               </p>
             </div>
             <TrendingUp className="w-8 h-8 text-hermetik-gold" />
@@ -323,15 +335,7 @@ const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Debug Info */}
-      <Card>
-        <h3 className="text-lg font-semibold text-white mb-4">Debug Information</h3>
-        <div className="space-y-2 text-sm">
-          <p className="text-gray-400">Dashboard Data Keys: {Object.keys(dashboardData || {}).join(', ')}</p>
-          <p className="text-gray-400">Wallet Categories: {Object.keys(dashboardData?.walletCategories || {}).join(', ')}</p>
-          <p className="text-gray-400">User Performance Count: {dashboardData?.userPerformance?.length || 0}</p>
-        </div>
-      </Card>
+
     </div>
   );
 };
