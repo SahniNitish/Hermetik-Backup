@@ -14,6 +14,20 @@ const {
 const { Console } = require('console');
 const { processWalletData } = require('../services/walletProcessor');
 
+// Import performance and security middleware
+const { 
+  walletDataCache, 
+  apiLimiter,
+  invalidateCache 
+} = require('../middleware/performance');
+
+const { 
+  validateWalletAddress,
+  handleValidationErrors 
+} = require('../middleware/security');
+
+const { logger } = require('../utils/logger');
+
 
 const router = express.Router();
 const DEBANK_BASE = 'https://pro-openapi.debank.com/v1';
@@ -251,10 +265,15 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
 
   try {
     // First, try to get stored wallet data as fallback
+    // Get the most recent stored data that actually has content (tokens or protocols)
     const storedWallets = await WalletData.find({ 
       userId: targetUserId,
-      address: { $in: wallets }
-    });
+      walletAddress: { $in: wallets },
+      $or: [
+        { 'tokens.0': { $exists: true } },  // Has at least one token
+        { 'protocols.0': { $exists: true } }  // Has at least one protocol
+      ]
+    }).sort({ timestamp: -1 });
     
     console.log(`📦 Found ${storedWallets.length} stored wallets for fallback`);
 
@@ -262,7 +281,30 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
       console.log(`\n🔄 Processing wallet: ${wallet}`);
       
       // Check if we have stored data for this wallet
-      const storedWallet = storedWallets.find(sw => sw.address === wallet);
+      // First try to find data with protocols (higher priority)
+      console.log(`🔍 Looking for stored data for wallet ${wallet}...`);
+      let storedWallet = await WalletData.findOne({ 
+        walletAddress: wallet,
+        'protocols.0': { $exists: true }  // Has at least one protocol
+      }).sort({ timestamp: -1 });
+      
+      // If no protocol data found, fallback to any data with content
+      if (!storedWallet) {
+        console.log(`🔍 No protocol data found, looking for any stored data with content...`);
+        storedWallet = await WalletData.findOne({ 
+          walletAddress: wallet,
+          $or: [
+            { 'tokens.0': { $exists: true } },  // Has at least one token
+            { 'protocols.0': { $exists: true } }  // Has at least one protocol
+          ]
+        }).sort({ timestamp: -1 });
+      }
+      
+      if (storedWallet) {
+        console.log(`✅ Found stored data for wallet ${wallet}: ${storedWallet.tokens?.length || 0} tokens, ${storedWallet.protocols?.length || 0} protocols, $${storedWallet.summary?.total_usd_value?.toFixed(2) || 0}`);
+      } else {
+        console.log(`❌ No stored data with content found for wallet ${wallet}`);
+      }
       
       try {
         // Fetch tokens and protocols in parallel
@@ -293,6 +335,39 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
       
       const protocols = Array.from(protocolsMap.values());
       console.log(`🔄 Deduplicated protocols: ${rawProtocols.length} -> ${protocols.length} for wallet ${wallet}`);
+      
+      // Check if live API returned any data
+      const hasLiveData = tokens.length > 0 || protocols.length > 0;
+      
+      if (!hasLiveData && storedWallet) {
+        console.log(`📦 Live API returned no data for wallet ${wallet}, using stored data`);
+        
+        const tokenValue = (storedWallet.tokens || []).reduce((sum, t) => sum + (t.usd_value || 0), 0);
+        const protocolValue = storedWallet.protocols.reduce((sum, p) => sum + (p.net_usd_value || 0), 0);
+        const summary = {
+          total_usd_value: tokenValue + protocolValue,
+          token_usd_value: tokenValue,
+          protocol_usd_value: protocolValue,
+          token_count: storedWallet.tokens?.length || 0,
+          protocol_count: storedWallet.protocols.length
+        };
+
+        return {
+          address: storedWallet.walletAddress,
+          balance: storedWallet.balance || 0,
+          tokens: storedWallet.tokens || [],
+          protocols: storedWallet.protocols.map(protocol => ({
+            protocol_id: protocol.protocol_id,
+            name: protocol.name,
+            chain_id: protocol.chain || 'ethereum',
+            chain: protocol.chain || 'ethereum',
+            logo_url: null,
+            net_usd_value: protocol.net_usd_value,
+            positions: protocol.positions || []
+          })),
+          summary: storedWallet.summary || summary
+        };
+      }
       
       // Get prices from CoinGecko
       const coinGeckoPrices = await fetchPricesFromCoinGecko(tokens);
@@ -491,18 +566,20 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
         if (storedWallet) {
           console.log(`📦 Using stored data for wallet ${wallet}`);
           
+          const tokenValue = (storedWallet.tokens || []).reduce((sum, t) => sum + (t.usd_value || 0), 0);
+          const protocolValue = storedWallet.protocols.reduce((sum, p) => sum + (p.net_usd_value || 0), 0);
           const summary = {
-            total_usd_value: storedWallet.protocols.reduce((sum, p) => sum + (p.net_usd_value || 0), 0),
-            token_usd_value: 0,
-            protocol_usd_value: storedWallet.protocols.reduce((sum, p) => sum + (p.net_usd_value || 0), 0),
-            token_count: 0,
+            total_usd_value: tokenValue + protocolValue,
+            token_usd_value: tokenValue,
+            protocol_usd_value: protocolValue,
+            token_count: storedWallet.tokens?.length || 0,
             protocol_count: storedWallet.protocols.length
           };
 
           return {
-            address: storedWallet.address,
+            address: storedWallet.walletAddress,
             balance: storedWallet.balance || 0,
-            tokens: [], // Empty tokens array for stored data
+            tokens: storedWallet.tokens || [], // Use stored tokens
             protocols: storedWallet.protocols.map(protocol => ({
               protocol_id: protocol.protocol_id,
               name: protocol.name,
@@ -512,7 +589,7 @@ router.get('/wallets', auth, requireUser, async (req, res) => {
               net_usd_value: protocol.net_usd_value,
               positions: protocol.positions || []
             })),
-            summary
+            summary: storedWallet.summary || summary
           };
         } else {
           console.log(`❌ No stored data available for wallet ${wallet}, returning empty result`);

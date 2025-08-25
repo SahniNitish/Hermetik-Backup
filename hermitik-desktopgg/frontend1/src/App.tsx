@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { UserViewProvider } from './contexts/UserViewContext';
+import { NAVProvider } from './contexts/NAVContext';
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/UI/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
@@ -53,9 +54,11 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <UserViewProvider>
-            <Router>
-              <AppRoutes />
-            </Router>
+            <NAVProvider>
+              <Router>
+                <AppRoutes />
+              </Router>
+            </NAVProvider>
           </UserViewProvider>
         </AuthProvider>
       </ThemeProvider>

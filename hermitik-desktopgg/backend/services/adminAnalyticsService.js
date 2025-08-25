@@ -45,10 +45,20 @@ class AdminAnalyticsService {
         }
       };
       
+      // Cache for APY calculations to prevent duplicates
+      const apyCache = new Map();
+      
       // Process each snapshot
       for (const snapshot of snapshots) {
         const user = snapshot.userId;
-        const walletData = await this.processUserSnapshot(snapshot, user);
+        
+        // Skip if we've already processed this user
+        if (apyCache.has(user._id.toString())) {
+          console.log(`🔄 Skipping duplicate processing for user: ${user.name}`);
+          continue;
+        }
+        
+        const walletData = await this.processUserSnapshot(snapshot, user, apyCache);
         
         if (walletData) {
           dashboardData.totalPortfolioValue += walletData.totalValue;
@@ -95,7 +105,7 @@ class AdminAnalyticsService {
   /**
    * Process a single user's snapshot data
    */
-  static async processUserSnapshot(snapshot, user) {
+  static async processUserSnapshot(snapshot, user, apyCache) {
     try {
       if (!snapshot.positions || snapshot.positions.length === 0) {
         return null;
@@ -136,7 +146,18 @@ class AdminAnalyticsService {
       // Calculate average APY for this user
       const userAPYData = await APYCalculationService.calculateAllPositionAPYs(user._id, new Date(), 1);
       const apyValues = Object.values(userAPYData).filter(apy => apy && apy.apy !== null && apy.apy !== undefined);
-      const averageAPY = apyValues.length > 0 ? apyValues.reduce((sum, apy) => sum + apy.apy, 0) / apyValues.length : 0;
+      
+      // Limit the number of APY values to prevent excessive calculations
+      const maxAPYValues = 10; // Limit to top 10 positions by value
+      const limitedAPYValues = apyValues
+        .sort((a, b) => (b.currentValue || 0) - (a.currentValue || 0))
+        .slice(0, maxAPYValues);
+      
+      const averageAPY = limitedAPYValues.length > 0 ? 
+        limitedAPYValues.reduce((sum, apy) => sum + apy.apy, 0) / limitedAPYValues.length : 0;
+      
+      // Cache the APY data for this user
+      apyCache.set(user._id.toString(), userAPYData);
       
       return {
         userId: user._id,

@@ -46,11 +46,32 @@ const Analytics: React.FC = () => {
     queryFn: () => analyticsApi.getPortfolioHistory(selectedPeriod),
   });
 
-  if (isLoading) {
+  // Fetch real APY data for positions
+  const { data: positionAPYs, isLoading: apyLoading, error: apyError } = useQuery({
+    queryKey: ['positionAPYs', viewedUser?.id],
+    queryFn: async () => {
+      try {
+        const data = await analyticsApi.getPositionAPYs(selectedPeriod, viewedUser?.id);
+        console.log('🔥 ANALYTICS: APY data received:', data);
+        return data;
+      } catch (error) {
+        console.error('❌ Analytics APYs error:', error);
+        return null;
+      }
+    },
+    enabled: !!wallets && (!!localStorage.getItem('access_token') || !!localStorage.getItem('mock_access_token') || import.meta.env.VITE_USE_MOCK_API !== 'false'),
+    refetchInterval: 300000,
+    staleTime: 240000
+  });
+
+  if (isLoading || apyLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <LoadingSpinner size="lg" />
-        <p className="text-white ml-4">Loading analytics...</p>
+        <p className="text-white ml-4">
+          {isLoading && apyLoading ? 'Loading portfolio and APY data...' :
+           isLoading ? 'Loading wallet data...' : 'Loading APY data...'}
+        </p>
       </div>
     );
   }
@@ -114,15 +135,36 @@ const Analytics: React.FC = () => {
     })) || []
   ).sort((a, b) => b.value - a.value).slice(0, 10);
 
-  // Protocol performance data (APY and value)
-  const protocolPerformanceData = wallets.flatMap(wallet => 
-    wallet.protocols?.map(protocol => ({
-      name: protocol.name,
-      apy: protocol.daily_apy || 0,
-      value: protocol.net_usd_value,
-      chain: protocol.chain
-    })) || []
-  ).sort((a, b) => b.apy - a.apy).slice(0, 8);
+  // Protocol performance data (APY and value) - using real APY data
+  const protocolPerformanceData = React.useMemo(() => {
+    if (!positionAPYs?.data?.positions) {
+      // Fallback to protocol data without APY
+      return wallets.flatMap(wallet => 
+        wallet.protocols?.map(protocol => ({
+          name: protocol.name,
+          apy: 0, // No APY data available
+          value: protocol.net_usd_value,
+          chain: protocol.chain
+        })) || []
+      ).sort((a, b) => b.value - a.value).slice(0, 8);
+    }
+
+    // Use real APY data from the API
+    const apyPositions = Object.entries(positionAPYs.data.positions).map(([positionId, apyData]: [string, any]) => {
+      const [protocolName, chain] = positionId.split('_').slice(0, 2);
+      return {
+        name: protocolName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        apy: apyData.apy || 0,
+        value: apyData.currentValue || 0,
+        chain: chain || 'unknown',
+        positionId
+      };
+    });
+
+    return apyPositions
+      .sort((a, b) => b.apy - a.apy)
+      .slice(0, 8);
+  }, [wallets, positionAPYs]);
 
   return (
     <div className="space-y-6">
@@ -190,41 +232,51 @@ const Analytics: React.FC = () => {
             </div>
           </div>
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={protocolPerformanceData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
-                <XAxis 
-                  dataKey="name" 
-                  stroke="#B2A534"
-                  tick={{ fill: '#B2A534', fontSize: 12 }}
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                />
-                <YAxis 
-                  stroke="#B2A534"
-                  tick={{ fill: '#B2A534' }}
-                  tickFormatter={(value) => `${value.toFixed(1)}%`}
-                />
-                <Tooltip 
-                  formatter={(value: any) => [`${value.toFixed(2)}%`, 'APY']}
-                  labelFormatter={(label) => `Position: ${label}`}
-                  contentStyle={{
-                    backgroundColor: '#1a1a1a',
-                    border: '1px solid #00321d',
-                    borderRadius: '0.5rem',
-                    color: '#FFFFFF'
-                  }}
-                />
-                <Bar 
-                  dataKey="apy" 
-                  fill="#00321d" 
-                  radius={[4, 4, 0, 0]}
-                  stroke="#B2A534"
-                  strokeWidth={1}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            {protocolPerformanceData.length === 0 || protocolPerformanceData.every(p => p.apy === 0) ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <BarChart3 className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 mb-2">No APY data available</p>
+                  <p className="text-sm text-gray-500">APY calculations require position snapshots</p>
+                </div>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={protocolPerformanceData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#B2A534"
+                    tick={{ fill: '#B2A534', fontSize: 12 }}
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                  />
+                  <YAxis 
+                    stroke="#B2A534"
+                    tick={{ fill: '#B2A534' }}
+                    tickFormatter={(value) => `${value.toFixed(1)}%`}
+                  />
+                  <Tooltip 
+                    formatter={(value: any) => [`${value.toFixed(2)}%`, 'APY']}
+                    labelFormatter={(label) => `Position: ${label}`}
+                    contentStyle={{
+                      backgroundColor: '#1a1a1a',
+                      border: '1px solid #00321d',
+                      borderRadius: '0.5rem',
+                      color: '#FFFFFF'
+                    }}
+                  />
+                  <Bar 
+                    dataKey="apy" 
+                    fill="#00321d" 
+                    radius={[4, 4, 0, 0]}
+                    stroke="#B2A534"
+                    strokeWidth={1}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 

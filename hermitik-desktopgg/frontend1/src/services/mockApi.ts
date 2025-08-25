@@ -424,6 +424,54 @@ export const mockAnalyticsApi = {
     };
   },
 
+  getPositionAPYs: async (period: number = 30, userId?: string): Promise<any> => {
+    await delay(400);
+    
+    // Mock APY data for positions
+    return {
+      success: true,
+      data: {
+        positions: {
+          'uniswap_v3_eth_base_uniswap3': {
+            apy: 12.5,
+            currentValue: 2500,
+            unclaimedRewards: 8.5,
+            calculationMethod: 'rewards_based_apy',
+            confidence: 'medium',
+            days: 7
+          },
+          'convex_frax_convex_base_convex': {
+            apy: 8.2,
+            currentValue: 1800,
+            unclaimedRewards: 3.2,
+            calculationMethod: 'rewards_based_apy',
+            confidence: 'high',
+            days: 14
+          }
+        }
+      }
+    };
+  },
+
+  getPnLSinceLastReport: async (reportType: 'daily' | 'weekly' | 'monthly' = 'daily'): Promise<any> => {
+    await delay(300);
+    
+    // Mock PnL data
+    return {
+      success: true,
+      data: {
+        pnlAmount: 1250.50,
+        pnlPercentage: 2.34,
+        currentValue: 54875.50,
+        previousValue: 53625.00,
+        reportType,
+        hasData: true,
+        currentDate: new Date().toISOString(),
+        previousDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      }
+    };
+  },
+
   exportExcel: async (): Promise<Blob> => {
     await delay(1500);
     

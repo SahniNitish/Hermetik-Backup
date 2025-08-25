@@ -255,6 +255,13 @@ const realAnalyticsApi = {
     return response.data;
   },
 
+  getPnLSinceLastReport: async (reportType: 'daily' | 'weekly' | 'monthly' = 'daily'): Promise<any> => {
+    console.log(`🔥 API: Fetching PnL Since Last Report (${reportType})...`);
+    const response = await api.get(`/analytics/portfolio/pnl?reportType=${reportType}`);
+    console.log('🔥 API: PnL response received:', response.data);
+    return response.data;
+  },
+
   exportExcel: async (): Promise<Blob> => {
     const response = await api.get('/analytics/export/excel', {
       responseType: 'blob',

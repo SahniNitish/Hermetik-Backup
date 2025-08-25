@@ -405,7 +405,14 @@ class APYCalculationService {
           // APY = (unclaimed_rewards / position_value) * 365
           const baseValue = currentValue - unclaimedRewards; // Exclude rewards from base value
           const rewardsPercent = baseValue > 0 ? (unclaimedRewards / baseValue) * 100 : 0;
-          const annualizedAPY = rewardsPercent * 365; // Assume 1 day old
+          let annualizedAPY = rewardsPercent * 365; // Assume 1 day old
+          
+          // CAP: Limit unrealistic APY values for new positions
+          const maxReasonableAPY = 200; // Cap at 200% APY for new positions
+          if (annualizedAPY > maxReasonableAPY) {
+            console.log(`⚠️ Capping unrealistic APY from ${annualizedAPY.toFixed(2)}% to ${maxReasonableAPY}% for new position`);
+            annualizedAPY = maxReasonableAPY;
+          }
           
           console.log(`📊 NEW Position APY calculation:`);
           console.log(`   Base value: $${baseValue.toFixed(2)}`);
@@ -422,8 +429,8 @@ class APYCalculationService {
             currentValue: currentValue,
             baseValue: baseValue,
             unclaimedRewards: unclaimedRewards,
-            confidence: 'medium',
-            notes: `NEW position with $${unclaimedRewards.toFixed(2)} unclaimed rewards (assumed 1 day old)`,
+            confidence: 'low', // Lower confidence for new positions due to 1-day assumption
+            notes: `NEW position with $${unclaimedRewards.toFixed(2)} unclaimed rewards (assumed 1 day old, APY capped at ${maxReasonableAPY}%)`,
             periodDays: periodDays
           };
         } else {

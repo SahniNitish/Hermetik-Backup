@@ -6,7 +6,22 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const ApiResponse = require('../utils/responseFormatter');
 const { AppError, catchAsync } = require('../middleware/errorHandler');
+
+// Import security middleware
+const { 
+  authLimiter, 
+  validateEmail, 
+  validatePassword, 
+  validateName, 
+  handleValidationErrors 
+} = require('../middleware/security');
+
+const { logger } = require('../utils/logger');
+
 const router = express.Router();
+
+// Disable auth rate limiting for development
+// router.use(authLimiter);
 
 // Role-based middleware
 const requireAdmin = (req, res, next) => {
@@ -23,30 +38,30 @@ const requireUser = (req, res, next) => {
   next();
 };
 
-// Admin-only signup route
-router.post('/admin-signup', async (req, res) => {
-  console.log('Admin Signup POST hit:', req.body);
+// Admin-only signup route with enhanced validation
+router.post('/admin-signup', [
+  validateName,
+  validateEmail,
+  validatePassword,
+  handleValidationErrors
+], async (req, res) => {
+  logger.info('Admin signup attempt', { 
+    email: req.body.email, 
+    ip: req.ip 
+  });
   
   const { name, email, password } = req.body;
-  
-  // Validation
-  if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Name, email, and password are required' });
-  }
-  
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters long' });
-  }
   
   try {
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      logger.security.loginAttempt(email, req.ip, false, 'email_already_exists');
       return res.status(400).json({ error: 'User with this email already exists' });
     }
     
-    // Hash password
-    const hashed = await bcrypt.hash(password, 10);
+    // Hash password with increased salt rounds for admin
+    const hashed = await bcrypt.hash(password, 12);
     
     // Create admin user
     const user = await User.create({ 
@@ -56,7 +71,13 @@ router.post('/admin-signup', async (req, res) => {
       role: 'admin'
     });
     
-    console.log('Admin user created successfully:', { id: user._id, email: user.email, role: user.role });
+    logger.info('Admin user created successfully', { 
+      userId: user._id,
+      name: user.name, 
+      email: user.email, 
+      role: user.role,
+      ip: req.ip
+    });
     
     res.status(201).json({ 
       message: 'Admin user created successfully', 
@@ -68,7 +89,12 @@ router.post('/admin-signup', async (req, res) => {
       } 
     });
   } catch (err) {
-    console.error('Admin signup error:', err);
+    logger.errorWithContext(err, { 
+      operation: 'admin_signup',
+      email,
+      ip: req.ip
+    });
+    
     if (err.code === 11000) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }

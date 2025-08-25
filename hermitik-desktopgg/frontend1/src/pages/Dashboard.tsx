@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { walletApi, analyticsApi } from '../services/api';
 import { TrendingUp, TrendingDown, Wallet, DollarSign, Download, BarChart3, Activity, Target, ArrowUpDown } from 'lucide-react';
 import { useUserView } from '../contexts/UserViewContext';
+import { useNAV } from '../contexts/NAVContext';
 import Card from '../components/UI/Card';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import AdminViewBanner from '../components/Admin/AdminViewBanner';
@@ -12,6 +13,8 @@ const Dashboard: React.FC = () => {
   console.log('Dashboard: Component rendering');
   
   const { viewedUser, isViewingAsAdmin } = useUserView();
+  const { navData } = useNAV();
+  const queryClient = useQueryClient();
   const [exportingNav, setExportingNav] = useState(false);
   const [error, setError] = useState('');
   // Remove time period selector - using consecutive day APY calculation
@@ -50,21 +53,46 @@ const Dashboard: React.FC = () => {
     staleTime: 240000
   });
 
+  // Fetch real PnL data
+  const { data: pnlData, isLoading: pnlLoading, error: pnlError } = useQuery({
+    queryKey: ['pnlSinceLastReport'],
+    queryFn: async () => {
+      try {
+        const data = await analyticsApi.getPnLSinceLastReport('daily');
+        console.log('🔥 DASHBOARD: PnL data received:', data);
+        return data;
+      } catch (error) {
+        console.error('❌ Dashboard PnL error:', error);
+        return null;
+      }
+    },
+    enabled: !!wallets && (!!localStorage.getItem('access_token') || !!localStorage.getItem('mock_access_token') || import.meta.env.VITE_USE_MOCK_API !== 'false'),
+    refetchInterval: 300000,
+    staleTime: 240000
+  });
+
   console.log('Dashboard: Query state:', { wallets, isLoading, error: queryError });
   console.log('Dashboard: APY state:', { positionAPYs, apyLoading, apyError });
+  console.log('Dashboard: PnL state:', { pnlData, pnlLoading, pnlError });
+  console.log('Dashboard: NAV state:', { navData, navLoading: false, navError: null });
   console.log('🔥 DASHBOARD: Full APY object:', JSON.stringify(positionAPYs, null, 2));
+  console.log('🔥 DASHBOARD: Full PnL object:', JSON.stringify(pnlData, null, 2));
   console.log('🔥 DASHBOARD: APY success?', positionAPYs?.success);
   console.log('🔥 DASHBOARD: APY positions?', positionAPYs?.data?.positions);
   console.log('🔥 DASHBOARD: APY positions keys:', positionAPYs?.data?.positions ? Object.keys(positionAPYs.data.positions) : 'NO POSITIONS');
   console.log('🔥 DASHBOARD: APY calculation method:', positionAPYs?.data?.positions ? Object.values(positionAPYs.data.positions)[0]?.calculationMethod : 'N/A');
 
-  if (isLoading || apyLoading) {
+  if (isLoading || apyLoading || pnlLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <LoadingSpinner size="lg" />
         <p className="text-white ml-4">
-          {isLoading && apyLoading ? 'Loading portfolio and APY data...' :
-           isLoading ? 'Loading wallet data...' : 'Loading APY data...'}
+          {(isLoading && apyLoading && pnlLoading) ? 'Loading portfolio, APY, and PnL data...' :
+           (isLoading && apyLoading) ? 'Loading portfolio and APY data...' :
+           (isLoading && pnlLoading) ? 'Loading portfolio and PnL data...' :
+           (apyLoading && pnlLoading) ? 'Loading APY and PnL data...' :
+           isLoading ? 'Loading wallet data...' : 
+           apyLoading ? 'Loading APY data...' : 'Loading PnL data...'}
         </p>
       </div>
     );
@@ -226,8 +254,17 @@ const Dashboard: React.FC = () => {
   console.log(`Total Positions NAV: $${totalPositionsValue.toLocaleString()}`);
   console.log(`Total Portfolio NAV: $${totalValue.toLocaleString()}`);
   
-  const dailyReturn = 2.34; // Mock data
+  // Extract real PnL data or use fallback
+  const pnlAmount = pnlData?.data?.pnlAmount || 0;
+  const dailyReturn = pnlData?.data?.pnlPercentage || 0;
   const isPositive = dailyReturn >= 0;
+  const previousValue = pnlData?.data?.previousValue || totalValue;
+  const hasRealPnLData = pnlData?.data?.hasData || false;
+  
+  // Show meaningful message when no PnL data is available
+  const pnlStatusMessage = !hasRealPnLData ? 
+    (pnlData?.success === false ? 'No historical data' : 'Loading...') : 
+    null;
 
   // Handle NAV export for admin viewing user's profile
   const handleNavExport = async () => {
@@ -251,49 +288,19 @@ const Dashboard: React.FC = () => {
       console.log('API Base URL:', import.meta.env.VITE_API_BASE_URL);
       console.log('Use Mock API:', import.meta.env.VITE_USE_MOCK_API);
       
-      // Try different export approaches
-      let blob;
-      try {
-        console.log('Trying regular exportExcel (no userId)...');
-        blob = await analyticsApi.exportExcel();
-        console.log('Regular export worked! Blob size:', blob.size);
-      } catch (regularError) {
-        console.log('Regular export failed, trying user-specific...');
-        console.error('Regular export error:', regularError);
-        
-        try {
-          console.log('Trying exportUserExcel with userId:', userIdSafe);
-          blob = await analyticsApi.exportUserExcel(userIdSafe);
-        } catch (userError) {
-          console.log('User Excel export failed, trying different ID format...');
-          console.error('User Excel error:', userError);
-          
-          // Try different endpoints that might exist
-          try {
-            console.log('Trying /analytics/export endpoint...');
-            const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/analytics/export?userId=${userIdSafe}`, {
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-              }
-            });
-            blob = await response.blob();
-          } catch (exportError) {
-            try {
-              console.log('Trying /export/excel endpoint...');
-              const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/export/excel?userId=${userIdSafe}`, {
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-                }
-              });
-              blob = await response.blob();
-            } catch (finalError) {
-              console.log('All export attempts failed');
-              console.error('Final error:', finalError);
-              throw new Error('No working export endpoint found. Backend needs /api/analytics/export/excel route.');
-            }
-          }
-        }
-      }
+      // Export current month by default
+      const now = new Date();
+      const currentMonth = now.getMonth(); // 0-based (0 = January)
+      const currentYear = now.getFullYear();
+      
+      console.log(`Exporting monthly NAV for user: ${userNameSafe} (${userIdSafe}) for month: ${currentMonth + 1}/${currentYear}`);
+      
+      // Invalidate NAV settings cache to ensure we get the latest saved settings
+      const queryClient = useQueryClient();
+      queryClient.invalidateQueries(['nav-settings']);
+      
+      // Use the correct monthly NAV export function
+      const blob = await analyticsApi.exportUserMonthlyNav(userIdSafe, currentMonth, currentYear);
       
       if (!blob || blob.size === 0) {
         throw new Error('Received empty report from server');
@@ -328,8 +335,7 @@ const Dashboard: React.FC = () => {
       
       // Safely create filename with null checks
       const userName = (viewedUser && viewedUser.name) ? viewedUser.name.toString().replace(/\s+/g, '_') : 'User';
-      const dateStr = new Date().toISOString().split('T')[0];
-      const filename = `${userName}_NAV_Report_${dateStr}.xlsx`;
+      const filename = `${userName}_Monthly_NAV_Report_${currentYear}_${String(currentMonth + 1).padStart(2, '0')}.xlsx`;
       link.download = filename;
       
       // Trigger download
@@ -409,7 +415,7 @@ const Dashboard: React.FC = () => {
       <div className="space-y-6">
         {/* Primary NAV Display */}
         <div className="bg-gradient-hermetik rounded-lg p-6 text-center">
-          <h2 className="text-xl font-heading font-semibold text-white mb-2">Current NAV</h2>
+          <h2 className="text-xl font-heading font-semibold text-white mb-2">Current Value</h2>
           <p className="text-4xl font-bold text-white">
             ${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
@@ -424,20 +430,39 @@ const Dashboard: React.FC = () => {
           <div className="card-hermetik p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-400 font-heading">PNL Since Last Report</p>
-                <div className="flex items-center space-x-2 mt-1">
-                  <p className={`text-xl font-bold ${isPositive ? 'text-hermetik-gold' : 'text-red-400'}`}>
-                    {isPositive ? '+' : ''}${Math.abs(dailyReturn * totalValue / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </p>
-                  {isPositive ? (
-                    <TrendingUp className="w-4 h-4 text-hermetik-gold" />
-                  ) : (
-                    <TrendingDown className="w-4 h-4 text-red-400" />
-                  )}
-                </div>
-                <p className={`text-xs ${isPositive ? 'text-hermetik-gold' : 'text-red-400'}`}>
-                  {isPositive ? '+' : ''}{dailyReturn.toFixed(2)}%
+                <p className="text-sm text-gray-400 font-heading">
+                  PNL Since Last Report
                 </p>
+                {pnlStatusMessage ? (
+                  <div className="mt-1">
+                    <p className="text-lg text-gray-500">{pnlStatusMessage}</p>
+                    <p className="text-xs text-gray-600">Need portfolio snapshots</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center space-x-2 mt-1">
+                      <p className={`text-xl font-bold ${isPositive ? 'text-hermetik-gold' : 'text-red-400'}`}>
+                        {isPositive ? '+' : ''}${Math.abs(pnlAmount).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </p>
+                      {isPositive ? (
+                        <TrendingUp className="w-4 h-4 text-hermetik-gold" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4 text-red-400" />
+                      )}
+                    </div>
+                    <p className={`text-xs ${isPositive ? 'text-hermetik-gold' : 'text-red-400'}`}>
+                      {isPositive ? '+' : ''}{dailyReturn.toFixed(2)}%
+                    </p>
+                    {hasRealPnLData && pnlData?.data?.previousDate && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Since {new Date(pnlData.data.previousDate).toLocaleDateString()}
+                      </p>
+                    )}
+                    {!hasRealPnLData && (
+                      <p className="text-xs text-gray-500 mt-1">(No snapshots available)</p>
+                    )}
+                  </>
+                )}
               </div>
               <BarChart3 className="w-8 h-8 text-hermetik-green" />
             </div>
@@ -463,9 +488,11 @@ const Dashboard: React.FC = () => {
               <div>
                 <p className="text-sm text-gray-400 font-heading">Last NAV</p>
                 <p className="text-xl font-bold text-white">
-                  ${(totalValue - (dailyReturn * totalValue / 100)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  ${previousValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>
-                <p className="text-xs text-gray-500">Previous report</p>
+                <p className="text-xs text-gray-500">
+                  {hasRealPnLData ? 'Previous report' : 'Calculated'}
+                </p>
               </div>
               <DollarSign className="w-8 h-8 text-hermetik-green" />
             </div>
@@ -488,20 +515,22 @@ const Dashboard: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-400 font-heading">Net Flows This Month</p>
-                <p className="text-xl font-bold text-hermetik-green">
-                  +${(totalValue * 0.05).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <p className={`text-xl font-bold ${navData.totalNetFlows >= 0 ? 'text-hermetik-green' : 'text-red-400'}`}>
+                  {navData.totalNetFlows >= 0 ? '+' : ''}${navData.totalNetFlows.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>
-                <p className="text-xs text-gray-500">Inflows - Outflows</p>
+                <p className="text-xs text-gray-500">
+                  {navData.totalNetFlows ? 'From NAV Calculator' : 'Set in NAV Calculator'}
+                </p>
               </div>
-              <ArrowUpDown className="w-8 h-8 text-hermetik-green" />
+              <ArrowUpDown className={`w-8 h-8 ${navData.totalNetFlows >= 0 ? 'text-hermetik-green' : 'text-red-400'}`} />
             </div>
           </div>
 
-          {/* Token NAV */}
+          {/* Token Value */}
           <div className="card-hermetik p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-400 font-heading">Token NAV</p>
+                <p className="text-sm text-gray-400 font-heading">Token Value</p>
                 <p className="text-xl font-bold text-hermetik-gold">
                   ${totalTokensValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>
@@ -513,11 +542,11 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Position NAV */}
+          {/* Current Value */}
           <div className="card-hermetik p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-400 font-heading">Position NAV</p>
+                <p className="text-sm text-gray-400 font-heading">Current Value</p>
                 <p className="text-xl font-bold text-hermetik-green">
                   ${totalPositionsValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </p>

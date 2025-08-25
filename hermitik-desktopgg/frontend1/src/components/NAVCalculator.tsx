@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { walletApi, analyticsApi } from '../services/api';
-import { Download, Calculator, RefreshCw, Lock, AlertCircle, ChevronDown, Calendar, Save } from 'lucide-react';
+import { Download, Calculator, RefreshCw, Lock, AlertCircle, ChevronDown, Calendar, Save, TrendingUp } from 'lucide-react';
 import { useUserView } from '../contexts/UserViewContext';
+import { useNAV } from '../contexts/NAVContext';
 import Card from './UI/Card';
 import Button from './UI/Button';
 import LoadingSpinner from './UI/LoadingSpinner';
@@ -55,6 +56,19 @@ interface MonthYear {
 
 const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
   const { viewedUser, isViewingAsAdmin } = useUserView();
+  const queryClient = useQueryClient();
+  const { 
+    navData, 
+    volatilityMetrics, 
+    monthlyHistory,
+    updateNetFlows, 
+    updateNAVData,
+    addMonthlyNav,
+    refreshVolatility,
+    isLoading: navLoading,
+    error: navError 
+  } = useNAV();
+  
   const [isCalculating, setIsCalculating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -76,12 +90,12 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
   const [exportMonth, setExportMonth] = useState(currentDate.getMonth() + 1);
   const [exportYear, setExportYear] = useState(currentDate.getFullYear());
   
-  // Calculation parameters - editable by admin
+  // Calculation parameters - editable by admin, synced with persistent NAV data
   const [params, setParams] = useState<CalculationParams>({
     annualExpense: 600,
     monthlyExpense: 50,
-    priorPreFeeNav: 0,
-    netFlows: 0,
+    priorPreFeeNav: navData.priorPreFeeNav,
+    netFlows: navData.netFlows,
     hurdleRate: 0,
     hurdleRateType: 'annual',
     highWaterMark: 0,
@@ -91,6 +105,19 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
     partialPaymentAmount: 0,
     priorPreFeeNavSource: 'manual'
   });
+
+  console.log('🔥 NAVCalculator: Initial NAV data:', navData);
+  console.log('🔥 NAVCalculator: Initial params:', params);
+
+  // Sync params with NAV context data when it changes
+  useEffect(() => {
+    console.log('🔥 NAVCalculator: NAV data changed:', navData);
+    setParams(prev => ({
+      ...prev,
+      priorPreFeeNav: navData.priorPreFeeNav,
+      netFlows: navData.netFlows
+    }));
+  }, [navData]);
 
   // Portfolio values
   const [portfolioData, setPortfolioData] = useState({
@@ -373,8 +400,8 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
     };
   }, [portfolioData, params]);
 
-  // Update parameters
-  const updateParam = (key: keyof CalculationParams, value: number | string) => {
+  // Update parameters with persistence
+  const updateParam = async (key: keyof CalculationParams, value: number | string) => {
     setParams(prev => {
       const newParams = {
         ...prev,
@@ -388,6 +415,25 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       
       return newParams;
     });
+
+    // Persist critical NAV data to database
+    try {
+      if (key === 'netFlows' && typeof value === 'number') {
+        console.log('🔥 NAVCalculator: Updating net flows to:', value);
+        await updateNetFlows(value);
+        setSuccessMessage('Net flows saved to database');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else if (key === 'priorPreFeeNav' && typeof value === 'number') {
+        console.log('🔥 NAVCalculator: Updating prior NAV to:', value);
+        await updateNAVData({ priorPreFeeNav: value });
+        setSuccessMessage('Prior NAV saved to database');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      }
+    } catch (error) {
+      console.error('Failed to persist NAV data:', error);
+      setError('Failed to save to database');
+      setTimeout(() => setError(''), 5000);
+    }
   };
   
   // Validate current calculations
@@ -480,6 +526,10 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
 
       setSuccessMessage('NAV settings saved successfully!');
       loadAvailableMonths(); // Refresh available months
+      
+      // Invalidate NAV data cache to ensure export uses updated settings
+      queryClient.invalidateQueries(['navData']);
+      queryClient.invalidateQueries(['nav-settings']);
       
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err: any) {
@@ -1453,32 +1503,199 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
         </div>
       </Card>
 
-      {/* Portfolio Data Summary */}
-      <Card>
-        <h3 className="text-lg font-semibold text-white mb-4 border-b border-gray-700 pb-2">
-          Current Portfolio Breakdown
-        </h3>
-        <div className="grid grid-cols-3 gap-4 text-sm">
-          <div className="bg-gray-800 p-3 rounded">
-            <p className="text-gray-400">Token Holdings</p>
-            <p className="text-green-400 font-mono text-lg">
-              ${(portfolioData?.totalTokensValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
+      {/* Portfolio Data Summary - HIDDEN */}
+      {false && (
+        <Card>
+          <h3 className="text-lg font-semibold text-white mb-4 border-b border-gray-700 pb-2">
+            Current Portfolio Breakdown
+          </h3>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div className="bg-gray-800 p-3 rounded">
+              <p className="text-gray-400">Token Holdings</p>
+              <p className="text-green-400 font-mono text-lg">
+                ${(portfolioData?.totalTokensValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="bg-gray-800 p-3 rounded">
+              <p className="text-gray-400">DeFi Positions</p>
+              <p className="text-purple-400 font-mono text-lg">
+                ${(portfolioData?.totalPositionsValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="bg-gray-800 p-3 rounded">
+              <p className="text-gray-400">Unclaimed Rewards</p>
+              <p className="text-yellow-400 font-mono text-lg">
+                ${(portfolioData?.totalRewards || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
           </div>
-          <div className="bg-gray-800 p-3 rounded">
-            <p className="text-gray-400">DeFi Positions</p>
-            <p className="text-purple-400 font-mono text-lg">
-              ${(portfolioData?.totalPositionsValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
+        </Card>
+      )}
+
+      {/* Annualized Volatility Analysis - HIDDEN */}
+      {false && (
+        <Card>
+          <div className="flex items-center justify-between mb-4 border-b border-gray-700 pb-2">
+            <h3 className="text-lg font-semibold text-white flex items-center">
+              <TrendingUp className="mr-2 h-5 w-5 text-blue-400" />
+              Annualized Volatility Analysis
+            </h3>
+            <Button
+              onClick={refreshVolatility}
+              disabled={navLoading}
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${navLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
           </div>
-          <div className="bg-gray-800 p-3 rounded">
-            <p className="text-gray-400">Unclaimed Rewards</p>
-            <p className="text-yellow-400 font-mono text-lg">
-              ${(portfolioData?.totalRewards || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-          </div>
-        </div>
-      </Card>
+
+          {navLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <LoadingSpinner size="sm" />
+              <span className="ml-2 text-gray-400">Loading volatility data...</span>
+            </div>
+          ) : volatilityMetrics ? (
+            <div className="space-y-6">
+              {/* Key Metrics */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="text-sm text-gray-400">Annualized Volatility</div>
+                  <div className="text-2xl font-bold text-white">
+                    {volatilityMetrics.annualizedVolatility.toFixed(2)}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    σ × √12 = {volatilityMetrics.standardDeviation.toFixed(2)}% × 3.46
+                  </div>
+                </div>
+                
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="text-sm text-gray-400">Monthly Std Dev</div>
+                  <div className="text-2xl font-bold text-blue-400">
+                    {volatilityMetrics.standardDeviation.toFixed(2)}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Monthly return volatility
+                  </div>
+                </div>
+                
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <div className="text-sm text-gray-400">Data Points</div>
+                  <div className="text-2xl font-bold text-green-400">
+                    {volatilityMetrics.monthsOfData}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {volatilityMetrics.monthsOfData < 12 ? 'Need 12+ for accuracy' : 'Sufficient data'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Monthly Returns History */}
+              {monthlyHistory.length > 0 && (
+                <div>
+                  <h4 className="text-md font-semibold text-white mb-3">Monthly NAV History</h4>
+                  <div className="bg-gray-800 rounded-lg overflow-hidden">
+                    <div className="max-h-60 overflow-y-auto">
+                      <table className="min-w-full">
+                        <thead className="bg-gray-700 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                              Month
+                            </th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
+                              NAV
+                            </th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
+                              Monthly Return
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-600">
+                          {monthlyHistory.slice(0, 12).map((entry, index) => (
+                            <tr key={index} className="hover:bg-gray-700/50">
+                              <td className="px-4 py-2 text-sm text-white">
+                                {new Date(entry.date).toLocaleDateString('en-US', { 
+                                  year: 'numeric', 
+                                  month: 'short' 
+                                })}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-white text-right font-mono">
+                                ${entry.nav.toFixed(2)}
+                              </td>
+                              <td className={`px-4 py-2 text-sm text-right font-mono ${
+                                entry.monthlyReturn === null 
+                                  ? 'text-gray-400' 
+                                  : entry.monthlyReturn >= 0 
+                                    ? 'text-green-400' 
+                                    : 'text-red-400'
+                              }`}>
+                                {entry.monthlyReturn === null 
+                                  ? 'N/A' 
+                                  : `${entry.monthlyReturn >= 0 ? '+' : ''}${entry.monthlyReturn.toFixed(2)}%`
+                                }
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Add Current Month NAV Button */}
+              <div className="flex items-center space-x-4">
+                <Button
+                  onClick={async () => {
+                    if (calculations?.currentPreFeeNav) {
+                      try {
+                        await addMonthlyNav(new Date().toISOString(), calculations.currentPreFeeNav);
+                        setSuccessMessage('Current NAV added to monthly history');
+                        setTimeout(() => setSuccessMessage(''), 3000);
+                      } catch (error) {
+                        setError('Failed to add current NAV to history');
+                        setTimeout(() => setError(''), 5000);
+                      }
+                    }
+                  }}
+                  disabled={!calculations?.currentPreFeeNav || navLoading}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Calendar className="h-4 w-4 mr-1" />
+                  Add Current NAV to History
+                </Button>
+                
+                <div className="text-sm text-gray-400">
+                  Current NAV: ${(calculations?.currentPreFeeNav || 0).toFixed(2)}
+                </div>
+              </div>
+
+              <div className="text-xs text-gray-500 border-t border-gray-700 pt-3">
+                <p><strong>Calculation:</strong> Annualized Volatility = Standard Deviation of Monthly Returns × √12</p>
+                <p><strong>Formula:</strong> σ_annual = σ_monthly × √12 = {volatilityMetrics.standardDeviation.toFixed(2)}% × 3.46 = {volatilityMetrics.annualizedVolatility.toFixed(2)}%</p>
+                <p><strong>Last Updated:</strong> {new Date(volatilityMetrics.lastCalculated).toLocaleString()}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-400">
+              <TrendingUp className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No volatility data available</p>
+              <p className="text-sm">Add monthly NAV entries to calculate volatility</p>
+            </div>
+          )}
+
+          {navError && (
+            <div className="mt-4 p-3 bg-red-900/30 border border-red-600 rounded-lg">
+              <div className="flex items-center">
+                <AlertCircle className="h-4 w-4 text-red-400 mr-2" />
+                <span className="text-red-400 text-sm">{navError}</span>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Close dropdown when clicking outside */}
       {showExportDropdown && (

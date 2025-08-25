@@ -76,6 +76,71 @@ router.get('/portfolio/history', auth, async (req, res) => {
   }
 });
 
+// Get PnL Since Last Report
+router.get('/portfolio/pnl', auth, catchAsync(async (req, res) => {
+  const userId = req.user.id;
+  const { reportType = 'daily' } = req.query; // daily, weekly, monthly
+  
+  console.log(`🔥 PnL API: Getting PnL for user ${userId}, report type: ${reportType}`);
+  
+  // Get current portfolio value (most recent snapshot)
+  const currentSnapshot = await DailySnapshot.findOne({ userId })
+    .sort({ date: -1 })
+    .limit(1);
+  
+  if (!currentSnapshot) {
+    return res.json(ApiResponse.success({
+      pnlAmount: 0,
+      pnlPercentage: 0,
+      currentValue: 0,
+      previousValue: 0,
+      reportType,
+      hasData: false
+    }, 'No portfolio data available'));
+  }
+  
+  // Calculate date for "last report" based on type
+  let lookbackDate = new Date();
+  switch (reportType) {
+    case 'daily':
+      lookbackDate.setDate(lookbackDate.getDate() - 1);
+      break;
+    case 'weekly':
+      lookbackDate.setDate(lookbackDate.getDate() - 7);
+      break;
+    case 'monthly':
+      lookbackDate.setMonth(lookbackDate.getMonth() - 1);
+      break;
+  }
+  
+  // Get snapshot from the "last report" period
+  const previousSnapshot = await DailySnapshot.findOne({
+    userId,
+    date: { $lte: lookbackDate }
+  }).sort({ date: -1 }).limit(1);
+  
+  const currentValue = currentSnapshot.totalNavUsd || 0;
+  const previousValue = previousSnapshot ? (previousSnapshot.totalNavUsd || 0) : currentValue;
+  
+  // Calculate PnL
+  const pnlAmount = currentValue - previousValue;
+  const pnlPercentage = previousValue > 0 ? ((pnlAmount / previousValue) * 100) : 
+                       (currentValue > 0 && previousValue === 0 ? 100 : 0); // 100% if going from 0 to positive
+  
+  console.log(`🔥 PnL Calculation: Current: $${currentValue}, Previous: $${previousValue}, PnL: $${pnlAmount} (${pnlPercentage.toFixed(2)}%)`);
+  
+  res.json(ApiResponse.success({
+    pnlAmount,
+    pnlPercentage,
+    currentValue,
+    previousValue,
+    reportType,
+    hasData: true,
+    currentDate: currentSnapshot.date,
+    previousDate: previousSnapshot?.date || null
+  }, 'PnL calculated successfully'));
+}));
+
 // Get portfolio performance metrics
 router.get('/portfolio/performance', auth, async (req, res) => {
   try {
@@ -456,7 +521,210 @@ router.get('/nav-settings/:userId/history', auth, async (req, res) => {
   }
 });
 
-// Export NAV for specific month/year
+// Export NAV for specific month/year using stored NAV data (new endpoint for frontend compatibility)
+router.get('/export/monthly-nav', auth, async (req, res) => {
+  try {
+    const { userId, month, year } = req.query;
+    
+    // Admin access check
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    
+    // Use current month/year if not provided
+    const currentDate = new Date();
+    const targetMonth = month !== undefined ? parseInt(month) : currentDate.getMonth();
+    const targetYear = year !== undefined ? parseInt(year) : currentDate.getFullYear();
+    
+    console.log(`📊 Exporting NAV report for user: ${userId}, ${targetYear}-${targetMonth + 1}`);
+    
+    // Get stored NAV data from database
+    const navSettings = await NAVSettings.findOne({
+      userId,
+      year: targetYear,
+      month: targetMonth + 1 // Convert 0-based month to 1-based
+    });
+    
+    if (!navSettings) {
+      return res.status(404).json({ error: 'No NAV data found for this month/year' });
+    }
+    
+    // Use stored NAV data instead of fetching live data
+    const navCalculations = navSettings.navCalculations || {};
+    const feeSettings = navSettings.feeSettings || {};
+    
+    // Extract values from stored data
+    const investments = navCalculations.totalAssets || 0;
+    const dividendsReceivable = navCalculations.dividendsReceivable || 0;
+    const totalAssets = navCalculations.totalAssets || 0;
+    const accruedExpenses = feeSettings.monthlyExpense || 50;
+    const totalLiabilities = accruedExpenses; // Fixed: Total liabilities = accrued expenses
+    const preFeeNav = navCalculations.preFeeNav || 0;
+    const priorPreFeeNav = navCalculations.priorPreFeeNav || 0;
+    const netFlows = navCalculations.netFlows || 0;
+    const performance = navCalculations.performance || 0;
+    const hurdleRate = feeSettings.hurdleRate || 0;
+    const highWaterMark = feeSettings.highWaterMark || 0;
+    const performanceFee = navCalculations.performanceFee || 0;
+    const accruedPerformanceFees = navCalculations.accruedPerformanceFees || 0;
+    const netAssets = navCalculations.netAssets || 0;
+    
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    
+    const monthName = monthNames[targetMonth];
+    const reportValuationDate = `${monthName} ${targetYear}`;
+    
+    console.log(`📊 Using stored NAV data for export`);
+    
+    console.log(`📊 NAV Calculations from stored data:
+  Total Assets: $${totalAssets.toFixed(2)}
+  Accrued Expenses: $${accruedExpenses.toFixed(2)}
+  Pre-Fee NAV: $${preFeeNav.toFixed(2)}
+  Performance: $${performance.toFixed(2)}
+  Performance Fee: $${performanceFee.toFixed(2)}
+  Accrued Performance Fees: $${accruedPerformanceFees.toFixed(2)}
+  Net Assets: $${netAssets.toFixed(2)}`);
+
+    // Create NAV report data (first sheet)
+    const navData = [
+      ['VALUATION DATE', reportValuationDate],
+      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
+      ['For more information on valuation methodology please see the Investment Management Agreement.'],
+      [''],
+      ['Section', 'Line Item', 'Value'],
+      ['ASSETS'],
+      ['', 'Investments at fair value (securities)', investments],
+      ['', 'Cash & cash equivalents', 0],
+      ['', 'Dividends and interest receivable', dividendsReceivable],
+      ['', 'Receivables for investments sold', 0],
+      ['', 'Other assets', 0],
+      ['Total Assets', '', totalAssets],
+      ['LIABILITIES'],
+      ['', 'Payables for investments purchased', 0],
+      ['', 'Accrued management fees', 0],
+      ['', 'Accrued fund expenses', accruedExpenses],
+      ['', 'Distribution payable', 0],
+      ['', 'Other liabilities', 0],
+      ['Total Liabilities', '', totalLiabilities],
+      ['', 'Pre-Fee Ending NAV', preFeeNav],
+      ['', 'Accrued performance fees', accruedPerformanceFees],
+      ['', 'NET ASSETS', netAssets],
+      [''],
+      ['PERFORMANCE FEE CALCULATION'],
+      ['', 'Prior period Pre-Fee Ending NAV', priorPreFeeNav],
+      ['', 'Net Flows', netFlows],
+      ['', 'Current period Pre-Fee Ending NAV', preFeeNav],
+      ['', 'Performance', performance],
+      ['', 'Hurdle Rate', hurdleRate],
+      ['', 'High Water Mark', highWaterMark],
+      ['', 'Performance Fee', performanceFee],
+      ['', 'Accrued Performance Fees', accruedPerformanceFees]
+    ];
+
+    // Create workbook
+    const workbook = XLSX.utils.book_new();
+
+    // First sheet: Monthly NAV Report
+    const navWorksheet = XLSX.utils.aoa_to_sheet(navData);
+    navWorksheet['!cols'] = [
+      { wch: 25 }, // Section
+      { wch: 35 }, // Line Item
+      { wch: 20 }  // Value
+    ];
+    
+    // Add formatting
+    const headerRows = [0, 1, 2, 4, 5, 11, 12, 18, 22];
+    const sectionRows = [6, 14, 22, 26];
+    const totalRows = [12, 20, 24];
+    
+    headerRows.forEach(rowIndex => {
+      ['A', 'B', 'C'].forEach(col => {
+        const cellAddr = `${col}${rowIndex + 1}`;
+        if (navWorksheet[cellAddr]) {
+          navWorksheet[cellAddr].s = {
+            font: { bold: true, size: rowIndex === 0 ? 14 : 11 },
+            alignment: { horizontal: 'left' }
+          };
+        }
+      });
+    });
+    
+    sectionRows.forEach(rowIndex => {
+      ['A', 'B', 'C'].forEach(col => {
+        const cellAddr = `${col}${rowIndex + 1}`;
+        if (navWorksheet[cellAddr]) {
+          navWorksheet[cellAddr].s = {
+            font: { bold: true, size: 12 },
+            fill: { fgColor: { rgb: '366092' } },
+            alignment: { horizontal: 'center' }
+          };
+        }
+      });
+    });
+    
+    totalRows.forEach(rowIndex => {
+      ['A', 'B', 'C'].forEach(col => {
+        const cellAddr = `${col}${rowIndex + 1}`;
+        if (navWorksheet[cellAddr]) {
+          navWorksheet[cellAddr].s = {
+            font: { bold: true, size: 11 },
+            fill: { fgColor: { rgb: 'E7E6E6' } },
+            border: {
+              top: { style: 'thin' },
+              bottom: { style: 'double' }
+            }
+          };
+        }
+      });
+    });
+
+    // Format currency cells in column C (Value column)
+    const currencyRows = [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 30, 31];
+    currencyRows.forEach(rowIndex => {
+      const cellAddr = `C${rowIndex + 1}`;
+      if (navWorksheet[cellAddr] && typeof navWorksheet[cellAddr].v === 'number') {
+        navWorksheet[cellAddr].s = {
+          numFmt: '"$"#,##0.00'
+        };
+      }
+    });
+    
+    XLSX.utils.book_append_sheet(workbook, navWorksheet, `NAV Report ${monthName} ${targetYear}`);
+
+    // Generate buffer
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: false });
+
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Generated Excel buffer is empty');
+    }
+
+    // Set headers
+    const user = await User.findById(userId);
+    const userName = user ? user.name.replace(/\s+/g, '_') : 'User';
+    const filename = `${userName}_Monthly_NAV_Report_${targetYear}_${String(targetMonth + 1).padStart(2, '0')}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Pragma', 'no-cache');
+
+    console.log(`✅ Monthly NAV report exported: ${filename} (${buffer.length} bytes)`);
+    res.send(buffer);
+
+  } catch (error) {
+    console.error('❌ Error generating monthly NAV report:', error.message);
+    res.status(500).json({ error: 'Failed to generate monthly NAV report', details: error.message });
+  }
+});
+
+// Export NAV for specific month/year using stored NAV data (original endpoint)
 router.get('/export/nav-monthly/:userId/:year/:month', auth, async (req, res) => {
   try {
     const { userId, year, month } = req.params;
@@ -465,6 +733,41 @@ router.get('/export/nav-monthly/:userId/:year/:month', auth, async (req, res) =>
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
+    
+    console.log(`📊 Exporting NAV report for user: ${userId}, ${year}-${month}`);
+    
+    // Get stored NAV data from database
+    const navSettings = await NAVSettings.findOne({
+      userId,
+      year: parseInt(year),
+      month: parseInt(month)
+    });
+    
+    if (!navSettings) {
+      return res.status(404).json({ error: 'No NAV data found for this month/year' });
+    }
+    
+    // Use stored NAV data instead of fetching live data
+    const navCalculations = navSettings.navCalculations || {};
+    const feeSettings = navSettings.feeSettings || {};
+    
+    // Extract values from stored data
+    const investments = navCalculations.totalAssets || 0;
+    const dividendsReceivable = navCalculations.dividendsReceivable || 0;
+    const totalAssets = navCalculations.totalAssets || 0;
+    const accruedExpenses = feeSettings.monthlyExpense || 50;
+    const totalLiabilities = accruedExpenses; // Fixed: Total liabilities = accrued expenses
+    const preFeeNav = navCalculations.preFeeNav || 0;
+    const priorPreFeeNav = navCalculations.priorPreFeeNav || 0;
+    const netFlows = navCalculations.netFlows || 0;
+    const performance = navCalculations.performance || 0;
+    const hurdleRate = feeSettings.hurdleRate || 0;
+    const highWaterMark = feeSettings.highWaterMark || 0;
+    const performanceFee = navCalculations.performanceFee || 0;
+    const accruedPerformanceFees = navCalculations.accruedPerformanceFees || 0;
+    const netAssets = navCalculations.netAssets || 0;
+    
+    const valuationDate = `${month}/${year}`;
     
     console.log(`📊 Exporting monthly NAV for user: ${userId}, ${year}-${month}`);
     
@@ -490,7 +793,7 @@ router.get('/export/nav-monthly/:userId/:year/:month', auth, async (req, res) =>
     ];
     
     const monthName = monthNames[parseInt(month) - 1];
-    const valuationDate = `${monthName} ${year}`;
+    const reportValuationDate = `${monthName} ${year}`;
     
     // Use saved calculations
     const calculations = settings.navCalculations;
@@ -499,7 +802,7 @@ router.get('/export/nav-monthly/:userId/:year/:month', auth, async (req, res) =>
     // Create NAV report data
     const navData = [
       ['MONTHLY NAV REPORT', '', ''],
-      ['VALUATION DATE', valuationDate, ''],
+      ['VALUATION DATE', reportValuationDate, ''],
       ['All values in USD as of 12:00 pm UTC on the Valuation date.', '', ''],
       ['For more information on valuation methodology please see the Investment Management Agreement.', '', ''],
       ['', '', ''],
@@ -766,7 +1069,7 @@ router.get('/export', auth, async (req, res) => {
     const dividendsReceivable = totalRewards;
     const totalAssets = investments + dividendsReceivable;
     const accruedExpenses = monthlyExpense;
-    const totalLiabilities = 0; // No liabilities this month
+    const totalLiabilities = accruedExpenses; // Total liabilities = accrued expenses
     const preFeeNav = totalAssets - accruedExpenses;
 
     // Performance calculation
