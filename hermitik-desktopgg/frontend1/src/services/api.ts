@@ -8,7 +8,7 @@ import {
 } from './mockApi';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
-const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API !== 'false'; // Default to true for demo
+const USE_MOCK_API = false; // Force use of real API
 
 const api = axios.create({
   baseURL: API_BASE_URL,

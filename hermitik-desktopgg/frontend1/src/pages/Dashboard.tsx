@@ -296,7 +296,6 @@ const Dashboard: React.FC = () => {
       console.log(`Exporting monthly NAV for user: ${userNameSafe} (${userIdSafe}) for month: ${currentMonth + 1}/${currentYear}`);
       
       // Invalidate NAV settings cache to ensure we get the latest saved settings
-      const queryClient = useQueryClient();
       queryClient.invalidateQueries(['nav-settings']);
       
       // Use the correct monthly NAV export function

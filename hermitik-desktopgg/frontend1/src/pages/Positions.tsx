@@ -30,38 +30,13 @@ const Positions: React.FC = () => {
     queryKey: ['positionAPYs', viewedUser?.id],
     queryFn: async () => {
       console.log('🔥 FRONTEND: Starting APY fetch...');
-      console.log('🔥 API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
-      console.log('🔥 Access token:', localStorage.getItem('access_token') ? 'EXISTS' : 'MISSING');
       console.log('🔥 Wallets available:', !!wallets, 'Count:', wallets?.length || 0);
       
       try {
-        const params = new URLSearchParams();
-        params.append('period', '1');
-        if (viewedUser?.id) {
-          params.append('userId', viewedUser.id);
-        }
-        const url = `${import.meta.env.VITE_API_BASE_URL}/analytics/positions/apy?${params.toString()}`;
-        console.log('🔥 FRONTEND: Fetching APY data for consecutive day calculation', viewedUser?.id ? `for user ${viewedUser.id}` : '');
-        
-        const response = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        console.log('🔥 FRONTEND: Response status:', response.status);
-        console.log('🔥 FRONTEND: Response headers:', [...response.headers.entries()]);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('🔥 FRONTEND: Error response body:', errorText);
-          throw new Error(`Failed to fetch position APYs: ${response.status} - ${errorText}`);
-        }
-        
-        const data = await response.json();
+        // Use the analytics API service instead of direct fetch
+        const { analyticsApi } = await import('../services/api');
+        const data = await analyticsApi.getPositionAPYs(1, viewedUser?.id);
         console.log('🔥 FRONTEND: APY data received:', data);
-        console.log('🔥 FRONTEND: APY data structure:', JSON.stringify(data, null, 2));
         return data;
       } catch (error) {
         console.error('❌ Position APYs error:', error);

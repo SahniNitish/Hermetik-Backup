@@ -686,13 +686,13 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
     );
   }
 
-  if (walletsLoading || settingsLoading) {
+  if (walletsLoading || settingsLoading || navLoading) {
     return (
       <div className={`${className}`}>
         <Card>
           <div className="flex items-center justify-center p-8">
             <LoadingSpinner size="lg" />
-            <p className="text-white ml-4">Loading portfolio data...</p>
+            <p className="text-white ml-4">Loading NAV calculator data...</p>
           </div>
         </Card>
       </div>
