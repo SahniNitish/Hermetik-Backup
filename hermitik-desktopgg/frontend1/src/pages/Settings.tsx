@@ -69,7 +69,12 @@ const Settings: React.FC = () => {
       
       console.log(`Exporting for month: ${currentMonth + 1}/${currentYear}`);
       
-      const blob = await analyticsApi.exportMonthlyNav(currentMonth, currentYear);
+      // For admin viewing as user, pass the user ID. For regular users, don't pass userId (backend will use authenticated user)
+      const targetUserId = (isViewingAsAdmin && viewedUser) ? viewedUser.id : undefined;
+      
+      console.log(`Exporting for user ID: ${targetUserId || 'current user'}`);
+      
+      const blob = await analyticsApi.exportMonthlyNav(currentMonth, currentYear, undefined, targetUserId);
       
       console.log('Received blob:', blob);
       console.log('Blob size:', blob?.size);

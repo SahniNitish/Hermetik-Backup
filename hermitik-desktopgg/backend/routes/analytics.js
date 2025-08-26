@@ -19,6 +19,7 @@ const APYCalculationService = require('../services/apyCalculationService');
 
 // Import Admin analytics service
 const AdminAnalyticsService = require('../services/adminAnalyticsService');
+const HistoricalDataService = require('../services/historicalDataService');
 
 // Import wallet processing utilities
 const {
@@ -260,7 +261,7 @@ router.get('/nav-settings/:userId/:year/:month', auth, async (req, res) => {
   try {
     const { userId, year, month } = req.params;
     
-    // Admin access check
+    // Admin access check - NAV Calculator is admin-only functionality
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -324,7 +325,7 @@ router.post('/nav-settings/:userId/:year/:month', auth, async (req, res) => {
     const { userId, year, month } = req.params;
     const { feeSettings, navCalculations, portfolioData } = req.body;
     
-    // Admin access check
+    // Admin access check - NAV Calculator is admin-only functionality
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -383,7 +384,7 @@ router.get('/nav-settings/:userId/available-months', auth, async (req, res) => {
   try {
     const { userId } = req.params;
     
-    // Admin access check
+    // Admin access check - NAV Calculator is admin-only functionality
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -402,7 +403,7 @@ router.get('/nav-settings/:userId/:year/:month/prior-nav', auth, async (req, res
   try {
     const { userId, year, month } = req.params;
     
-    // Admin access check
+    // Admin access check - NAV Calculator is admin-only functionality
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -483,7 +484,7 @@ router.get('/nav-settings/:userId/history', auth, async (req, res) => {
     const { userId } = req.params;
     const { limit = 12 } = req.query; // Default to 12 months
     
-    // Admin access check
+    // Admin access check - NAV Calculator is admin-only functionality
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -521,18 +522,92 @@ router.get('/nav-settings/:userId/history', auth, async (req, res) => {
   }
 });
 
+// Export portfolio data using historical snapshots (recommended for accurate historical reports)
+router.get('/export/historical', auth, async (req, res) => {
+  try {
+    const { date, wallet, userId: targetUserId } = req.query;
+    
+    // Determine target user ID
+    let userId = req.user.id;
+    if (targetUserId && req.user.role === 'admin') {
+      userId = targetUserId;
+    } else if (targetUserId && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied: You can only access your own data' });
+    }
+    
+    // Parse target date (default to yesterday to ensure we have snapshot data)
+    let targetDate;
+    if (date) {
+      targetDate = new Date(date);
+    } else {
+      targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() - 1); // Yesterday
+    }
+    
+    console.log(`📊 Exporting historical portfolio for user: ${userId}, date: ${targetDate.toISOString().split('T')[0]}`);
+    
+    // Get historical portfolio data
+    const portfolioData = await HistoricalDataService.getPortfolioAtDate(userId, targetDate, wallet);
+    
+    // Get user info for filename
+    const user = await User.findById(userId);
+    const userName = user ? user.name.replace(/\s+/g, '_') : 'User';
+    
+    // Generate Excel using existing utility
+    const { generatePortfolioExcel } = require('../utils/portfolioToExcelTables');
+    
+    // Convert historical data to expected format
+    const excelData = {
+      user: user,
+      date: portfolioData.date,
+      summary: portfolioData.summary,
+      tokens: portfolioData.tokens,
+      positions: portfolioData.positions,
+      wallets: portfolioData.wallets,
+      dataSource: 'historical_snapshot'
+    };
+    
+    const workbook = await generatePortfolioExcel(excelData);
+    
+    // Set headers for file download
+    const dateStr = targetDate.toISOString().split('T')[0];
+    const filename = `${userName}_Portfolio_${dateStr}_Historical.xlsx`;
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    // Send the workbook
+    await workbook.xlsx.write(res);
+    res.end();
+    
+    console.log(`✅ Historical portfolio export completed: ${filename}`);
+    
+  } catch (error) {
+    console.error('❌ Error in historical portfolio export:', error);
+    res.status(500).json({ 
+      error: 'Failed to export historical portfolio', 
+      details: error.message,
+      suggestion: 'Try a different date or ensure historical data exists'
+    });
+  }
+});
+
 // Export NAV for specific month/year using stored NAV data (new endpoint for frontend compatibility)
 router.get('/export/monthly-nav', auth, async (req, res) => {
   try {
     const { userId, month, year } = req.query;
     
-    // Admin access check
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
+    // Determine target user ID
+    let targetUserId = userId;
+    
+    // If no userId provided, use the authenticated user's ID
+    if (!targetUserId) {
+      targetUserId = req.user.id;
     }
     
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
+    // Access control: Users can only access their own data, admins can access any user's data
+    if (req.user.role !== 'admin' && targetUserId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied: You can only access your own data' });
     }
     
     // Use current month/year if not provided
@@ -540,14 +615,17 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
     const targetMonth = month !== undefined ? parseInt(month) : currentDate.getMonth();
     const targetYear = year !== undefined ? parseInt(year) : currentDate.getFullYear();
     
-    console.log(`📊 Exporting NAV report for user: ${userId}, ${targetYear}-${targetMonth + 1}`);
+    console.log(`📊 Exporting NAV report for user: ${targetUserId}, ${targetYear}-${targetMonth + 1}`);
     
-    // Get stored NAV data from database
-    const navSettings = await NAVSettings.findOne({
-      userId,
-      year: targetYear,
-      month: targetMonth + 1 // Convert 0-based month to 1-based
-    });
+    // Use HistoricalDataService to get complete NAV data
+    const historicalNavData = await HistoricalDataService.getNAVDataForMonth(
+      targetUserId, 
+      targetYear, 
+      targetMonth + 1 // Convert 0-based to 1-based
+    );
+    
+    const navSettings = historicalNavData.navSettings;
+    const positionHistory = historicalNavData.positionHistory;
     
     if (!navSettings) {
       return res.status(404).json({ error: 'No NAV data found for this month/year' });
@@ -706,7 +784,7 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
     }
 
     // Set headers
-    const user = await User.findById(userId);
+    const user = await User.findById(targetUserId);
     const userName = user ? user.name.replace(/\s+/g, '_') : 'User';
     const filename = `${userName}_Monthly_NAV_Report_${targetYear}_${String(targetMonth + 1).padStart(2, '0')}.xlsx`;
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -729,9 +807,9 @@ router.get('/export/nav-monthly/:userId/:year/:month', auth, async (req, res) =>
   try {
     const { userId, year, month } = req.params;
     
-    // Admin access check
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
+    // Access control: Users can only access their own data, admins can access any user's data
+    if (req.user.role !== 'admin' && userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied: You can only access your own data' });
     }
     
     console.log(`📊 Exporting NAV report for user: ${userId}, ${year}-${month}`);
