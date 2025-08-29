@@ -616,6 +616,8 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
     const targetYear = year !== undefined ? parseInt(year) : currentDate.getFullYear();
     
     console.log(`📊 Exporting NAV report for user: ${targetUserId}, ${targetYear}-${targetMonth + 1}`);
+    console.log(`📊 Export parameters received: userId=${userId}, month=${month}, year=${year}`);
+    console.log(`📊 Calculated parameters: targetUserId=${targetUserId}, targetMonth=${targetMonth}, targetYear=${targetYear}`);
     
     // Use HistoricalDataService to get complete NAV data
     const historicalNavData = await HistoricalDataService.getNAVDataForMonth(
@@ -635,12 +637,15 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
     const navCalculations = navSettings.navCalculations || {};
     const feeSettings = navSettings.feeSettings || {};
     
-    // Extract values from stored data
-    const investments = navCalculations.totalAssets || 0;
+    console.log(`📊 Raw navCalculations object:`, JSON.stringify(navCalculations, null, 2));
+    console.log(`📊 Raw feeSettings object:`, JSON.stringify(feeSettings, null, 2));
+    
+    // Extract values from stored data - FIXED: Use correct field names
+    const investments = navCalculations.investments || 0;
     const dividendsReceivable = navCalculations.dividendsReceivable || 0;
     const totalAssets = navCalculations.totalAssets || 0;
-    const accruedExpenses = feeSettings.monthlyExpense || 50;
-    const totalLiabilities = accruedExpenses; // Fixed: Total liabilities = accrued expenses
+    const accruedExpenses = navCalculations.accruedExpenses || feeSettings.monthlyExpense || 50;
+    const totalLiabilities = navCalculations.totalLiabilities || accruedExpenses;
     const preFeeNav = navCalculations.preFeeNav || 0;
     const priorPreFeeNav = navCalculations.priorPreFeeNav || 0;
     const netFlows = navCalculations.netFlows || 0;
@@ -662,6 +667,8 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
     console.log(`📊 Using stored NAV data for export`);
     
     console.log(`📊 NAV Calculations from stored data:
+  Investments: $${investments.toFixed(2)}
+  Dividends Receivable: $${dividendsReceivable.toFixed(2)}
   Total Assets: $${totalAssets.toFixed(2)}
   Accrued Expenses: $${accruedExpenses.toFixed(2)}
   Pre-Fee NAV: $${preFeeNav.toFixed(2)}
@@ -756,7 +763,7 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
             fill: { fgColor: { rgb: 'E7E6E6' } },
             border: {
               top: { style: 'thin' },
-              bottom: { style: 'double' }
+              bottom: { style: 'thin' }
             }
           };
         }
@@ -773,8 +780,67 @@ router.get('/export/monthly-nav', auth, async (req, res) => {
         };
       }
     });
+
+    XLSX.utils.book_append_sheet(workbook, navWorksheet, `NAV Report - ${monthName}`);
+
+    // Create annotated NAV report data (second sheet)
+    const navAnnotatedData = [
+      ['VALUATION DATE', reportValuationDate],
+      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
+      ['For more information on valuation methodology please see the Investment Management Agreement.'],
+      [''],
+      ['Section', 'Line Item', 'Value', 'Notes', 'Calculation'],
+      ['ASSETS'],
+      ['', 'Investments at fair value (securities)', investments, 'Closing price as of NAV day', 'Sum of Tokens + Positions - Rewards'],
+      ['', 'Cash & cash equivalents', 0, 'Bank, money market, etc.', ''],
+      ['', 'Dividends and interest receivable', dividendsReceivable, 'Accrued income not yet received', 'Sum of Unclaimed Rewards'],
+      ['', 'Receivables for investments sold', 0, 'Pending settlements', ''],
+      ['', 'Other assets', 0, 'Prepaids, misc.', ''],
+      ['Total Assets', '', totalAssets, '', 'Investments + Dividends Receivable'],
+      ['LIABILITIES'],
+      ['', 'Payables for investments purchased', 0, 'Pending settlements', ''],
+      ['', 'Accrued management fees', 0, 'Not yet paid, accrues each period until paid', ''],
+      ['', 'Accrued fund expenses', accruedExpenses, 'Subtracted from assets this month', 'Monthly expense rate'],
+      ['', 'Distribution payable', 0, 'Dividends/interest owed to holders', ''],
+      ['', 'Other liabilities', 0, 'Miscellaneous', ''],
+      ['Total Liabilities', '', totalLiabilities, '', 'Sum of Liabilities'],
+      ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Total Assets - Accrued Expenses'],
+      ['', 'Accrued performance fees', accruedPerformanceFees, 'Performance fee on dividends', 'Dividends * Performance Fee Rate'],
+      ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Performance Fee - Accrued Performance Fees'],
+      [''],
+      ['PERFORMANCE FEE CALCULATION'],
+      ['', 'Prior period Pre-Fee Ending NAV', priorPreFeeNav, '', 'Pre-Fee Ending NAV from prior period'],
+      ['', 'Net Flows', netFlows, '', 'Deposits/withdrawals since prior period'],
+      ['', 'Current period Pre-Fee Ending NAV', preFeeNav, '', 'Pre-Fee Ending NAV from current period'],
+      ['', 'Performance', performance, '', 'Current Pre-Fee NAV - Prior Pre-Fee NAV - Net Flows'],
+      ['', 'Hurdle Rate', hurdleRate, 'Performance threshold', ''],
+      ['', 'High Water Mark', highWaterMark, 'Performance threshold', ''],
+      ['', 'Performance Fee', performanceFee, 'Performance fee on excess returns', 'If Performance > Hurdle, (Performance - Hurdle) * Rate'],
+      ['', 'Accrued Performance Fees', accruedPerformanceFees, 'Performance fee on dividends', 'Dividends * Performance Fee Rate']
+    ];
+
+    // Second sheet: NAV Report with annotations
+    const annotatedWorksheet = XLSX.utils.aoa_to_sheet(navAnnotatedData);
+    annotatedWorksheet['!cols'] = [
+      { wch: 25 }, // Section
+      { wch: 35 }, // Line Item
+      { wch: 20 }, // Value
+      { wch: 40 }, // Notes
+      { wch: 50 }  // Calculation
+    ];
     
-    XLSX.utils.book_append_sheet(workbook, navWorksheet, `NAV Report ${monthName} ${targetYear}`);
+    const annotatedHeaderRows = [0, 1, 2, 4, 5, 11, 12, 18, 22];
+    annotatedHeaderRows.forEach(rowIndex => {
+      ['A', 'B', 'C', 'D', 'E'].forEach(col => {
+        const cellAddr = `${col}${rowIndex + 1}`;
+        if (annotatedWorksheet[cellAddr]) {
+          annotatedWorksheet[cellAddr].s = {
+            font: { bold: true }
+          };
+        }
+      });
+    });
+    XLSX.utils.book_append_sheet(workbook, annotatedWorksheet, `NAV Report - ${monthName} - Notes`);
 
     // Generate buffer
     const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: false });
@@ -830,11 +896,11 @@ router.get('/export/nav-monthly/:userId/:year/:month', auth, async (req, res) =>
     const feeSettings = navSettings.feeSettings || {};
     
     // Extract values from stored data
-    const investments = navCalculations.totalAssets || 0;
+    const investments = navCalculations.investments || 0;
     const dividendsReceivable = navCalculations.dividendsReceivable || 0;
     const totalAssets = navCalculations.totalAssets || 0;
-    const accruedExpenses = feeSettings.monthlyExpense || 50;
-    const totalLiabilities = accruedExpenses; // Fixed: Total liabilities = accrued expenses
+    const accruedExpenses = navCalculations.accruedExpenses || feeSettings.monthlyExpense || 50;
+    const totalLiabilities = navCalculations.totalLiabilities || accruedExpenses;
     const preFeeNav = navCalculations.preFeeNav || 0;
     const priorPreFeeNav = navCalculations.priorPreFeeNav || 0;
     const netFlows = navCalculations.netFlows || 0;
@@ -1219,12 +1285,12 @@ router.get('/export', auth, async (req, res) => {
       ['LIABILITIES'],
       ['', 'Payables for investments purchased', 0, 'Pending settlements', ''],
       ['', 'Accrued management fees', 0, 'Not yet paid, accrues each period until paid', ''],
-      ['', 'Accrued fund expenses', accruedExpenses, 'Subtracted from assets this month', '$600 per year, $50/month'],
+      ['', 'Accrued fund expenses', accruedExpenses, 'Custom monthly expense amount', `$${monthlyExpense} per month`],
       ['', 'Distribution payable', 0, 'Dividends/interest owed to holders', ''],
       ['', 'Other liabilities', 0, 'Miscellaneous', ''],
       ['Total Liabilities', '', totalLiabilities, '', 'Sum of Liabilities'],
-      ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Assets - Accrued Expenses'],
-      ['', 'Accrued performance fees', accruedPerformanceFees, '25% of Dividends and Interest Receivable', 'Dividends * 0.25'],
+      ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Total Assets - Accrued Expenses'],
+      ['', 'Accrued performance fees', accruedPerformanceFees, 'Performance fee on dividends', `$${performanceFee.toFixed(2)} per month`],
       ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Performance Fee - Accrued Performance Fees'],
       [''],
       ['PERFORMANCE FEE CALCULATION'],
@@ -1232,692 +1298,10 @@ router.get('/export', auth, async (req, res) => {
       ['', 'Net Flows', netFlows, '', 'Deposits/withdrawals since prior period'],
       ['', 'Current period Pre-Fee Ending NAV', preFeeNav, '', 'Pre-Fee Ending NAV from current period'],
       ['', 'Performance', performance, '', 'Current Pre-Fee NAV - Prior Pre-Fee NAV - Net Flows'],
-      ['', 'Hurdle Rate', hurdleRate, 'Set to 0 for this month', ''],
-      ['', 'High Water Mark', highWaterMark, 'Set to 0 for this month', ''],
-      ['', 'Performance Fee', performanceFee, '25% of excess performance over hurdle', 'If Performance > Hurdle Rate, Performance * 0.25'],
-      ['', 'Accrued Performance Fees', accruedPerformanceFees, '25% of Dividends and Interest Receivable', 'Dividends * 0.25']
-    ];
-
-    // Create workbook
-    const workbook = XLSX.utils.book_new();
-
-    // First sheet: Monthly NAV Report - July
-    const navWorksheet = XLSX.utils.aoa_to_sheet(navData);
-    navWorksheet['!cols'] = [
-      { wch: 25 }, // Section
-      { wch: 35 }, // Line Item
-      { wch: 20 }  // Value
-    ];
-    const navHeaderRows = [0, 1, 2, 4, 5, 11, 12, 18, 22];
-    navHeaderRows.forEach(rowIndex => {
-      ['A', 'B', 'C'].forEach(col => {
-        const cellAddr = `${col}${rowIndex + 1}`;
-        if (navWorksheet[cellAddr]) {
-          navWorksheet[cellAddr].s = {
-            font: { bold: true }
-          };
-        }
-      });
-    });
-
-    // Format currency cells in column C (Value column)
-    const currencyRows = [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 30, 31];
-    currencyRows.forEach(rowIndex => {
-      const cellAddr = `C${rowIndex + 1}`;
-      if (navWorksheet[cellAddr] && typeof navWorksheet[cellAddr].v === 'number') {
-        navWorksheet[cellAddr].s = {
-          numFmt: '"$"#,##0.00'
-        };
-      }
-    });
-    XLSX.utils.book_append_sheet(workbook, navWorksheet, 'NAV Report - July');
-
-    // Second sheet: NAV Report with annotations
-    const annotatedWorksheet = XLSX.utils.aoa_to_sheet(navAnnotatedData);
-    annotatedWorksheet['!cols'] = [
-      { wch: 25 }, // Section
-      { wch: 35 }, // Line Item
-      { wch: 20 }, // Value
-      { wch: 40 }, // Notes
-      { wch: 50 }  // Calculation
-    ];
-    const annotatedHeaderRows = [0, 1, 2, 4, 5, 11, 12, 18, 22];
-    annotatedHeaderRows.forEach(rowIndex => {
-      ['A', 'B', 'C', 'D', 'E'].forEach(col => {
-        const cellAddr = `${col}${rowIndex + 1}`;
-        if (annotatedWorksheet[cellAddr]) {
-          annotatedWorksheet[cellAddr].s = {
-            font: { bold: true }
-          };
-        }
-      });
-    });
-    XLSX.utils.book_append_sheet(workbook, annotatedWorksheet, 'NAV Report - July - Notes');
-
-    // Generate buffer
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: false });
-
-    // Validate buffer
-    if (!buffer || buffer.length === 0) {
-      throw new Error('Generated Excel buffer is empty');
-    }
-
-    // Set headers
-    const filename = `Monthly_NAV_Report_2025_07.xlsx`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Pragma', 'no-cache');
-
-    console.log(`✅ NAV report generated: ${filename} (${buffer.length} bytes)`);
-    res.send(buffer);
-
-  } catch (error) {
-    console.error('❌ Error generating NAV report:', error.message);
-    res.status(500).json({ error: 'Failed to generate NAV report', details: error.message });
-  }
-});
-
-// NAV EXPORT - Clean and Simple
-router.get('/export/nav', auth, async (req, res) => {
-  try {
-    console.log('📊 Starting NAV calculation...');
-
-    // Admin support
-    let userId = req.user.id;
-    const { wallet, userId: targetUserId } = req.query;
-
-    if (targetUserId && req.user.role === 'admin') {
-      userId = targetUserId;
-      console.log(`🔄 Admin generating NAV for user: ${userId}`);
-    }
-
-    // Get user and wallets
-    const user = await User.findById(userId);
-    if (!user || !user.wallets?.length) {
-      return res.status(404).json({ error: 'No wallets found' });
-    }
-
-    // Process wallets directly
-    const wallets = wallet ? [wallet] : user.wallets;
-    let totalInvestments = 0;
-    let totalRewards = 0;
-
-    console.log(`📊 Processing ${wallets.length} wallet${wallets.length !== 1 ? 's' : ''} for NAV calculation...`);
-
-    for (const walletAddress of wallets) {
-      console.log(`🔄 Processing wallet: ${walletAddress}`);
-
-      // Fetch tokens and protocols in parallel
-      const [tokens, rawProtocols] = await Promise.all([
-        fetchTokens(walletAddress),
-        fetchAllProtocols(walletAddress)
-      ]);
-
-      // Deduplicate protocols by name
-      const protocolsMap = new Map();
-      rawProtocols.forEach(protocol => {
-        const key = protocol.name;
-        if (!protocolsMap.has(key)) {
-          protocolsMap.set(key, protocol);
-        } else {
-          const existing = protocolsMap.get(key);
-          existing.portfolio_item_list = [
-            ...(existing.portfolio_item_list || []),
-            ...(protocol.portfolio_item_list || [])
-          ];
-          if (protocol.net_usd_value > existing.net_usd_value) {
-            existing.net_usd_value = protocol.net_usd_value;
-          }
-        }
-      });
-      const protocols = Array.from(protocolsMap.values());
-
-      // Get prices from CoinGecko
-      const coinGeckoPrices = await fetchPricesFromCoinGecko(tokens);
-
-      // Process tokens
-      const enrichedTokens = tokens.map(token => {
-        const symbol = (token.symbol || '').toLowerCase();
-        let finalPrice = 0;
-
-        if (coinGeckoPrices[symbol]) {
-          finalPrice = coinGeckoPrices[symbol];
-        } else if (symbol.startsWith('w') && coinGeckoPrices[symbol.substring(1)]) {
-          finalPrice = coinGeckoPrices[symbol.substring(1)];
-        } else if (token.price && token.price > 0) {
-          finalPrice = token.price;
-        }
-
-        const usdValue = finalPrice * safeNumber(token.amount || 0);
-        totalInvestments += usdValue;
-
-        return {
-          symbol: token.symbol,
-          amount: token.amount || 0,
-          price: finalPrice,
-          usd_value: usdValue
-        };
-      });
-
-      // Process protocols with deduplication
-      for (const protocol of protocols) {
-        const portfolioItems = protocol.portfolio_item_list || [];
-
-        // Deduplicate positions
-        const uniqueItemsMap = new Map();
-        portfolioItems.forEach(item => {
-          const tokenAmounts = (item.detail?.supply_token_list || [])
-            .map(t => `${t.symbol}:${safeNumber(t.amount).toFixed(6)}`)
-            .sort()
-            .join('|');
-          const itemKey = `${item.pool?.id || 'no-pool'}-${tokenAmounts}`;
-
-          if (!uniqueItemsMap.has(itemKey)) {
-            uniqueItemsMap.set(itemKey, item);
-
-            // Add position value to investments
-            const itemValue = safeNumber(item.stats?.net_usd_value || 0);
-            totalInvestments += itemValue;
-
-            // Add rewards to dividends receivable
-            if (item.detail?.reward_token_list) {
-              for (const reward of item.detail.reward_token_list) {
-                const rewardValue = safeNumber(reward.amount || 0) * safeNumber(reward.price || 0);
-                totalRewards += rewardValue;
-              }
-            }
-          }
-        });
-      }
-
-      console.log(`💼 Wallet ${walletAddress} processed:`, {
-        tokens: enrichedTokens.length,
-        token_value: enrichedTokens.reduce((sum, t) => sum + t.usd_value, 0).toFixed(2),
-        protocols: protocols.length
-      });
-    }
-
-    console.log(`📊 Total calculated investments: $${totalInvestments.toFixed(2)}`);
-    console.log(`📊 Total calculated rewards: $${totalRewards.toFixed(2)}`);
-
-    // NAV Calculations
-    const valuationDate = '7/21/2025'; // Use sample date
-    const annualExpense = 600;
-    const monthlyExpense = 50; // $600/year ÷ 12 = $50/month
-    const priorPreFeeNav = totalInvestments; // Per user request
-    const netFlows = 0; // Assuming no deposits/withdrawals
-    const hurdleRate = 0; // Per user request
-    const highWaterMark = 0; // Per user request
-
-    // Calculate values
-    const investments = totalInvestments;
-    const dividendsReceivable = totalRewards;
-    const totalAssets = investments + dividendsReceivable;
-    const accruedExpenses = monthlyExpense;
-    const totalLiabilities = 0; // No liabilities this month
-    const preFeeNav = totalAssets - accruedExpenses;
-
-    // Performance calculation
-    // Performance = Current NAV - Prior NAV + Net Flows
-    const performance = 36.18; // Use sample value to match Net Assets
-    const performanceFee = 9.04; // Use sample value (36.18 * 0.25)
-    const accruedPerformanceFees = 70.66; // Use sample value to match Net Assets
-    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
-
-    console.log(`📊 NAV Calculations:
-  Total Assets: $${totalAssets.toFixed(2)}
-  Accrued Expenses: $${accruedExpenses.toFixed(2)}
-  Pre-Fee NAV: $${preFeeNav.toFixed(2)}
-  Performance: $${performance.toFixed(2)}
-  Performance Fee: $${performanceFee.toFixed(2)}
-  Accrued Performance Fees: $${accruedPerformanceFees.toFixed(2)}
-  Net Assets: $${netAssets.toFixed(2)}`);
-
-    // Create NAV report data (first sheet)
-    const navData = [
-      ['VALUATION DATE', valuationDate],
-      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
-      ['For more information on valuation methodology please see the Investment Management Agreement.'],
-      [''],
-      ['Section', 'Line Item', 'Value'],
-      ['ASSETS'],
-      ['', 'Investments at fair value (securities)', investments],
-      ['', 'Cash & cash equivalents', 0],
-      ['', 'Dividends and interest receivable', dividendsReceivable],
-      ['', 'Receivables for investments sold', 0],
-      ['', 'Other assets', 0],
-      ['Total Assets', '', totalAssets],
-      ['LIABILITIES'],
-      ['', 'Payables for investments purchased', 0],
-      ['', 'Accrued management fees', 0],
-      ['', 'Accrued fund expenses', accruedExpenses],
-      ['', 'Distribution payable', 0],
-      ['', 'Other liabilities', 0],
-      ['Total Liabilities', '', totalLiabilities],
-      ['', 'Pre-Fee Ending NAV', preFeeNav],
-      ['', 'Accrued performance fees', accruedPerformanceFees],
-      ['', 'NET ASSETS', netAssets],
-      [''],
-      ['PERFORMANCE FEE CALCULATION'],
-      ['', 'Prior period Pre-Fee Ending NAV', priorPreFeeNav],
-      ['', 'Net Flows', netFlows],
-      ['', 'Current period Pre-Fee Ending NAV', preFeeNav],
-      ['', 'Performance', performance],
-      ['', 'Hurdle Rate', hurdleRate],
-      ['', 'High Water Mark', highWaterMark],
-      ['', 'Performance Fee', performanceFee],
-      ['', 'Accrued Performance Fees', accruedPerformanceFees]
-    ];
-
-    // Create annotated NAV report data (second sheet)
-    const navAnnotatedData = [
-      ['VALUATION DATE', valuationDate],
-      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
-      ['For more information on valuation methodology please see the Investment Management Agreement.'],
-      [''],
-      ['Section', 'Line Item', 'Value', 'Notes', 'Calculation'],
-      ['ASSETS'],
-      ['', 'Investments at fair value (securities)', investments, 'Closing price as of NAV day', 'Sum of Tokens, Positions'],
-      ['', 'Cash & cash equivalents', 0, 'Bank, money market, etc.', ''],
-      ['', 'Dividends and interest receivable', dividendsReceivable, 'Accrued income not yet received', 'Sum of Unclaimed Rewards'],
-      ['', 'Receivables for investments sold', 0, 'Pending settlements', ''],
-      ['', 'Other assets', 0, 'Prepaids, misc.', ''],
-      ['Total Assets', '', totalAssets, '', 'Sum of Assets'],
-      ['LIABILITIES'],
-      ['', 'Payables for investments purchased', 0, 'Pending settlements', ''],
-      ['', 'Accrued management fees', 0, 'Not yet paid, accrues each period until paid', ''],
-      ['', 'Accrued fund expenses', accruedExpenses, 'Subtracted from assets this month', '$600 per year, $50/month'],
-      ['', 'Distribution payable', 0, 'Dividends/interest owed to holders', ''],
-      ['', 'Other liabilities', 0, 'Miscellaneous', ''],
-      ['Total Liabilities', '', totalLiabilities, '', 'Sum of Liabilities'],
-      ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Assets - Accrued Expenses'],
-      ['', 'Accrued performance fees', accruedPerformanceFees, 'Fixed per sample data', ''],
-      ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Performance Fee - Accrued Performance Fees'],
-      [''],
-      ['PERFORMANCE FEE CALCULATION'],
-      ['', 'Prior period Pre-Fee Ending NAV', priorPreFeeNav, '', 'Pre-Fee Ending NAV from prior period'],
-      ['', 'Net Flows', netFlows, '', 'Deposits/withdrawals since prior period'],
-      ['', 'Current period Pre-Fee Ending NAV', preFeeNav, '', 'Pre-Fee Ending NAV from current period'],
-      ['', 'Performance', performance, '', 'Current Pre-Fee NAV - Prior Pre-Fee NAV - Net Flows'],
-      ['', 'Hurdle Rate', hurdleRate, 'Set to 0 for this month', ''],
-      ['', 'High Water Mark', highWaterMark, 'Set to 0 for this month', ''],
-      ['', 'Performance Fee', performanceFee, '25% of excess performance over hurdle', 'If Performance > Hurdle Rate, Performance * 0.25'],
-      ['', 'Accrued Performance Fees', accruedPerformanceFees, 'Fixed per sample data', '']
-    ];
-
-    // Create workbook
-    const workbook = XLSX.utils.book_new();
-
-    // First sheet: Monthly NAV Report - July
-    const navWorksheet = XLSX.utils.aoa_to_sheet(navData);
-    navWorksheet['!cols'] = [
-      { wch: 25 }, // Section
-      { wch: 35 }, // Line Item
-      { wch: 20 }  // Value
-    ];
-    const navHeaderRows = [0, 1, 2, 4, 5, 11, 12, 18, 22];
-    navHeaderRows.forEach(rowIndex => {
-      ['A', 'B', 'C'].forEach(col => {
-        const cellAddr = `${col}${rowIndex + 1}`;
-        if (navWorksheet[cellAddr]) {
-          navWorksheet[cellAddr].s = {
-            font: { bold: true }
-          };
-        }
-      });
-    });
-
-    // Format currency cells in column C (Value column)
-    const currencyRows = [6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 30, 31];
-    currencyRows.forEach(rowIndex => {
-      const cellAddr = `C${rowIndex + 1}`;
-      if (navWorksheet[cellAddr] && typeof navWorksheet[cellAddr].v === 'number') {
-        navWorksheet[cellAddr].s = {
-          numFmt: '"$"#,##0.00'
-        };
-      }
-    });
-    XLSX.utils.book_append_sheet(workbook, navWorksheet, 'NAV Report - July');
-
-    // Second sheet: NAV Report with annotations
-    const annotatedWorksheet = XLSX.utils.aoa_to_sheet(navAnnotatedData);
-    annotatedWorksheet['!cols'] = [
-      { wch: 25 }, // Section
-      { wch: 35 }, // Line Item
-      { wch: 20 }, // Value
-      { wch: 40 }, // Notes
-      { wch: 50 }  // Calculation
-    ];
-    const annotatedHeaderRows = [0, 1, 2, 4, 5, 11, 12, 18, 22];
-    annotatedHeaderRows.forEach(rowIndex => {
-      ['A', 'B', 'C', 'D', 'E'].forEach(col => {
-        const cellAddr = `${col}${rowIndex + 1}`;
-        if (annotatedWorksheet[cellAddr]) {
-          annotatedWorksheet[cellAddr].s = {
-            font: { bold: true }
-          };
-        }
-      });
-    });
-    XLSX.utils.book_append_sheet(workbook, annotatedWorksheet, 'NAV Report - July - Notes');
-
-    // Generate buffer
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: false });
-
-    // Validate buffer
-    if (!buffer || buffer.length === 0) {
-      throw new Error('Generated Excel buffer is empty');
-    }
-
-    // Set headers
-    const filename = `Monthly_NAV_Report_2025_07.xlsx`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Length', buffer.length);
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Pragma', 'no-cache');
-
-    console.log(`✅ NAV report generated: ${filename} (${buffer.length} bytes)`);
-    res.send(buffer);
-
-  } catch (error) {
-    console.error('❌ Error generating NAV report:', error.message);
-    res.status(500).json({ error: 'Failed to generate NAV report', details: error.message });
-  }
-});
-
-// NAV Calculator Export - Dynamic with Custom Parameters
-router.get('/export/nav-calculator', auth, async (req, res) => {
-  try {
-    console.log('📊 Starting dynamic NAV calculator export...');
-
-    // Admin support
-    let userId = req.user.id;
-    const { 
-      userId: targetUserId,
-      annualExpense = 600,
-      monthlyExpense = 50,
-      priorPreFeeNav = 0,
-      netFlows = 0,
-      hurdleRate = 0,
-      hurdleRateType = 'annual',
-      highWaterMark = 0,
-      performanceFeeRate = 0.25,
-      accruedPerformanceFeeRate = 0.25,
-      feePaymentStatus = 'not_paid',
-      partialPaymentAmount = 0
-    } = req.query;
-
-    if (targetUserId && req.user.role === 'admin') {
-      userId = targetUserId;
-      console.log(`🔄 Admin generating custom NAV for user: ${userId}`);
-    }
-
-    // Parse parameters
-    const params = {
-      annualExpense: parseFloat(annualExpense),
-      monthlyExpense: parseFloat(monthlyExpense),
-      priorPreFeeNav: parseFloat(priorPreFeeNav),
-      netFlows: parseFloat(netFlows),
-      hurdleRate: parseFloat(hurdleRate),
-      hurdleRateType: String(hurdleRateType),
-      highWaterMark: parseFloat(highWaterMark),
-      performanceFeeRate: parseFloat(performanceFeeRate),
-      accruedPerformanceFeeRate: parseFloat(accruedPerformanceFeeRate),
-      feePaymentStatus: String(feePaymentStatus),
-      partialPaymentAmount: parseFloat(partialPaymentAmount)
-    };
-
-    console.log('📋 Custom parameters:', params);
-
-    // Get user and wallets
-    const user = await User.findById(userId);
-    if (!user || !user.wallets?.length) {
-      return res.status(404).json({ error: 'No wallets found' });
-    }
-
-    // Process wallets directly
-    const wallets = user.wallets;
-    let totalInvestments = 0;
-    let totalRewards = 0;
-
-    console.log(`📊 Processing ${wallets.length} wallet${wallets.length !== 1 ? 's' : ''} for custom NAV calculation...`);
-
-    for (const walletAddress of wallets) {
-      console.log(`🔄 Processing wallet: ${walletAddress}`);
-
-      // Fetch tokens and protocols in parallel
-      const [tokens, rawProtocols] = await Promise.all([
-        fetchTokens(walletAddress),
-        fetchAllProtocols(walletAddress)
-      ]);
-
-      // Deduplicate protocols by name
-      const protocolsMap = new Map();
-      rawProtocols.forEach(protocol => {
-        const key = protocol.name;
-        if (!protocolsMap.has(key)) {
-          protocolsMap.set(key, protocol);
-        } else {
-          const existing = protocolsMap.get(key);
-          existing.portfolio_item_list = [
-            ...(existing.portfolio_item_list || []),
-            ...(protocol.portfolio_item_list || [])
-          ];
-          if (protocol.net_usd_value > existing.net_usd_value) {
-            existing.net_usd_value = protocol.net_usd_value;
-          }
-        }
-      });
-      const protocols = Array.from(protocolsMap.values());
-
-      // Get prices from CoinGecko
-      const coinGeckoPrices = await fetchPricesFromCoinGecko(tokens);
-
-      // Process tokens
-      const enrichedTokens = tokens.map(token => {
-        const symbol = (token.symbol || '').toLowerCase();
-        let finalPrice = 0;
-
-        if (coinGeckoPrices[symbol]) {
-          finalPrice = coinGeckoPrices[symbol];
-        } else if (symbol.startsWith('w') && coinGeckoPrices[symbol.substring(1)]) {
-          finalPrice = coinGeckoPrices[symbol.substring(1)];
-        } else if (token.price && token.price > 0) {
-          finalPrice = token.price;
-        }
-
-        const usdValue = finalPrice * safeNumber(token.amount || 0);
-        totalInvestments += usdValue;
-
-        return {
-          symbol: token.symbol,
-          amount: token.amount || 0,
-          price: finalPrice,
-          usd_value: usdValue
-        };
-      });
-
-      // Process protocols with deduplication
-      for (const protocol of protocols) {
-        const portfolioItems = protocol.portfolio_item_list || [];
-
-        // Deduplicate positions
-        const uniqueItemsMap = new Map();
-        portfolioItems.forEach(item => {
-          const tokenAmounts = (item.detail?.supply_token_list || [])
-            .map(t => `${t.symbol}:${safeNumber(t.amount).toFixed(6)}`)
-            .sort()
-            .join('|');
-          const itemKey = `${item.pool?.id || 'no-pool'}-${tokenAmounts}`;
-
-          if (!uniqueItemsMap.has(itemKey)) {
-            uniqueItemsMap.set(itemKey, item);
-
-            // Add position value to investments
-            const itemValue = safeNumber(item.stats?.net_usd_value || 0);
-            totalInvestments += itemValue;
-
-            // Add rewards to dividends receivable
-            if (item.detail?.reward_token_list) {
-              for (const reward of item.detail.reward_token_list) {
-                const rewardValue = safeNumber(reward.amount || 0) * safeNumber(reward.price || 0);
-                totalRewards += rewardValue;
-              }
-            }
-          }
-        });
-      }
-
-      console.log(`💼 Wallet ${walletAddress} processed:`, {
-        tokens: enrichedTokens.length,
-        token_value: enrichedTokens.reduce((sum, t) => sum + t.usd_value, 0).toFixed(2),
-        protocols: protocols.length
-      });
-    }
-
-    console.log(`📊 Total calculated investments: $${totalInvestments.toFixed(2)}`);
-    console.log(`📊 Total calculated rewards: $${totalRewards.toFixed(2)}`);
-
-    // Dynamic NAV Calculations using custom parameters
-    const valuationDate = new Date().toLocaleDateString('en-US');
-
-    // Calculate values using custom parameters
-    const investments = totalInvestments;
-    const dividendsReceivable = totalRewards;
-    const totalAssets = investments + dividendsReceivable;
-    const accruedExpenses = params.monthlyExpense;
-    const totalLiabilities = accruedExpenses;
-    const preFeeNav = totalAssets - accruedExpenses;
-
-    // Performance calculation with custom parameters
-    // Performance = Current NAV - Prior NAV + Net Flows
-    // Note: Negative net flows = withdrawals, Positive = deposits
-    const performance = preFeeNav - params.priorPreFeeNav + params.netFlows;
-    
-    // Calculate hurdle amount from percentage
-    let hurdleAmount = 0;
-    if (params.hurdleRate > 0 && params.priorPreFeeNav > 0) {
-      if (params.hurdleRateType === 'annual') {
-        // Convert annual percentage to monthly dollar amount
-        hurdleAmount = (params.hurdleRate / 100 / 12) * params.priorPreFeeNav;
-      } else {
-        // Monthly percentage to dollar amount
-        hurdleAmount = (params.hurdleRate / 100) * params.priorPreFeeNav;
-      }
-    }
-    
-    // Performance fee calculation with proper hurdle rate
-    const performanceFee = performance > hurdleAmount ? 
-      (performance - hurdleAmount) * params.performanceFeeRate : 0;
-    
-    // Accrued performance fees based on payment status
-    let accruedPerformanceFees = 0;
-    const calculatedAccruedFees = dividendsReceivable * params.accruedPerformanceFeeRate;
-    
-    switch (params.feePaymentStatus) {
-      case 'paid':
-        accruedPerformanceFees = 0;
-        break;
-      case 'not_paid':
-        accruedPerformanceFees = calculatedAccruedFees;
-        break;
-      case 'partially_paid':
-        accruedPerformanceFees = Math.max(0, calculatedAccruedFees - params.partialPaymentAmount);
-        break;
-      default:
-        accruedPerformanceFees = calculatedAccruedFees;
-    }
-    
-    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
-
-    console.log(`📊 Custom NAV Calculations:
-  Total Assets: $${totalAssets.toFixed(2)}
-  Accrued Expenses: $${accruedExpenses.toFixed(2)}
-  Pre-Fee NAV: $${preFeeNav.toFixed(2)}
-  Performance: $${performance.toFixed(2)}
-  Hurdle Amount: $${hurdleAmount.toFixed(2)}
-  Performance Fee: $${performanceFee.toFixed(2)}
-  Calculated Accrued Fees: $${calculatedAccruedFees.toFixed(2)}
-  Applied Accrued Performance Fees: $${accruedPerformanceFees.toFixed(2)}
-  Fee Payment Status: ${params.feePaymentStatus}
-  Net Assets: $${netAssets.toFixed(2)}`);
-
-    // Create professional fund-style NAV report data (first sheet)
-    const navData = [
-      ['MONTHLY NAV REPORT', '', ''],
-      ['VALUATION DATE', valuationDate, ''],
-      ['All values in USD as of 12:00 pm UTC on the Valuation date.', '', ''],
-      ['For more information on valuation methodology please see the Investment Management Agreement.', '', ''],
-      ['', '', ''],
-      ['Section', 'Line Item', 'Value'],
-      ['ASSETS', '', ''],
-      ['', 'Investments at fair value (securities)', `$${investments.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Cash & cash equivalents', '$0.00'],
-      ['', 'Dividends and interest receivable', `$${dividendsReceivable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Receivables for investments sold', '$0.00'],
-      ['', 'Other assets', '$0.00'],
-      ['Total Assets', '', `$${totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', '', ''],
-      ['LIABILITIES', '', ''],
-      ['', 'Payables for investments purchased', '$0.00'],
-      ['', 'Accrued management fees', '$0.00'],
-      ['', 'Accrued fund expenses', `$${accruedExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Distribution payable', '$0.00'],
-      ['', 'Other liabilities', '$0.00'],
-      ['Total Liabilities', '', `$${totalLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', '', ''],
-      ['', 'Pre-Fee Ending NAV', `$${preFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Accrued performance fees', `$${accruedPerformanceFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'NET ASSETS', `$${netAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', '', ''],
-      ['PERFORMANCE FEE CALCULATION', '', ''],
-      ['', 'Prior period Pre-Fee Ending NAV', `$${params.priorPreFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Net Flows', `$${params.netFlows.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Current period Pre-Fee Ending NAV', `$${preFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Performance', `$${performance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Hurdle Rate', `${params.hurdleRate}% ${params.hurdleRateType} ($${hurdleAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`],
-      ['', 'High Water Mark', `$${params.highWaterMark.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Performance Fee', `$${performanceFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
-      ['', 'Accrued Performance Fees', `$${accruedPerformanceFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]
-    ];
-
-    // Create annotated NAV report data (second sheet)
-    const navAnnotatedData = [
-      ['VALUATION DATE', valuationDate],
-      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
-      ['For more information on valuation methodology please see the Investment Management Agreement.'],
-      [''],
-      ['Section', 'Line Item', 'Value', 'Notes', 'Calculation'],
-      ['ASSETS'],
-      ['', 'Investments at fair value (securities)', investments, 'Closing price as of NAV day', 'Sum of Tokens, Positions'],
-      ['', 'Cash & cash equivalents', 0, 'Bank, money market, etc.', ''],
-      ['', 'Dividends and interest receivable', dividendsReceivable, 'Accrued income not yet received', 'Sum of Unclaimed Rewards'],
-      ['', 'Receivables for investments sold', 0, 'Pending settlements', ''],
-      ['', 'Other assets', 0, 'Prepaids, misc.', ''],
-      ['Total Assets', '', totalAssets, '', 'Sum of Assets'],
-      ['LIABILITIES'],
-      ['', 'Payables for investments purchased', 0, 'Pending settlements', ''],
-      ['', 'Accrued management fees', 0, 'Not yet paid, accrues each period until paid', ''],
-      ['', 'Accrued fund expenses', accruedExpenses, 'Custom monthly expense amount', `$${params.annualExpense} per year, $${params.monthlyExpense}/month`],
-      ['', 'Distribution payable', 0, 'Dividends/interest owed to holders', ''],
-      ['', 'Other liabilities', 0, 'Miscellaneous', ''],
-      ['Total Liabilities', '', totalLiabilities, '', 'Sum of Liabilities'],
-      ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Assets - Accrued Expenses'],
-      ['', 'Accrued performance fees', accruedPerformanceFees, `${(params.accruedPerformanceFeeRate * 100).toFixed(1)}% of Dividends and Interest Receivable`, `Dividends * ${params.accruedPerformanceFeeRate}`],
-      ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Performance Fee - Accrued Performance Fees'],
-      [''],
-      ['PERFORMANCE FEE CALCULATION'],
-      ['', 'Prior period Pre-Fee Ending NAV', `$${params.priorPreFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Custom value from calculator', 'User input'],
-      ['', 'Net Flows', `$${params.netFlows.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Custom deposits/withdrawals', 'User input (negative = withdrawal)'],
-      ['', 'Current period Pre-Fee Ending NAV', `$${preFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, '', 'Pre-Fee Ending NAV from current period'],
-      ['', 'Performance', `$${performance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, '', 'Current Pre-Fee NAV - Prior Pre-Fee NAV + Net Flows'],
-      ['', 'Hurdle Rate', `${params.hurdleRate}% ${params.hurdleRateType}`, 'Custom hurdle rate', `User input ($${hurdleAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD)`],
-      ['', 'High Water Mark', `$${params.highWaterMark.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Custom high water mark', 'User input'],
-      ['', 'Performance Fee', `$${performanceFee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, `${(params.performanceFeeRate * 100).toFixed(1)}% of excess performance over hurdle`, `If Performance > Hurdle Amount, (Performance - $${hurdleAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) * ${params.performanceFeeRate}`],
-      ['', 'Accrued Performance Fees', `$${accruedPerformanceFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, `Payment Status: ${params.feePaymentStatus}`, `Calculated: $${calculatedAccruedFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, Applied: $${accruedPerformanceFees.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`]
+      ['', 'Hurdle Rate', hurdleRate, 'Performance threshold', ''],
+      ['', 'High Water Mark', highWaterMark, 'Performance threshold', ''],
+      ['', 'Performance Fee', performanceFee, 'Performance fee on excess returns', 'If Performance > Hurdle, (Performance - Hurdle) * Rate'],
+      ['', 'Accrued Performance Fees', accruedPerformanceFees, 'Performance fee on dividends', `$${accruedPerformanceFees.toFixed(2)} per month`]
     ];
 
     // Add custom parameters sheet
@@ -1927,17 +1311,14 @@ router.get('/export/nav-calculator', auth, async (req, res) => {
       ['User ID:', userId],
       [''],
       ['Parameter', 'Value', 'Description'],
-      ['Annual Expense', `$${params.annualExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Total annual fund expenses'],
-      ['Monthly Expense', `$${params.monthlyExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Monthly accrued expenses'],
-      ['Prior Pre-Fee NAV', `$${params.priorPreFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Previous period pre-fee NAV'],
-      ['Net Flows', `$${params.netFlows.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Deposits/withdrawals since prior period (negative = withdrawal)'],
-      ['Hurdle Rate', `${params.hurdleRate}% ${params.hurdleRateType}`, 'Minimum return threshold for performance fees'],
-      ['Hurdle Rate Type', params.hurdleRateType, 'Annual or monthly percentage basis'],
-      ['Fee Payment Status', params.feePaymentStatus, 'Whether accrued performance fees have been paid'],
-      ['Partial Payment Amount', `$${params.partialPaymentAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Amount paid if partially paid'],
-      ['High Water Mark', `$${params.highWaterMark.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Historical peak NAV for performance calculation'],
-      ['Performance Fee Rate', `${(params.performanceFeeRate * 100).toFixed(1)}%`, 'Percentage of excess performance charged as fee'],
-      ['Accrued Performance Fee Rate', `${(params.accruedPerformanceFeeRate * 100).toFixed(1)}%`, 'Percentage of dividends charged as performance fee']
+      ['Annual Expense', `$${annualExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Total annual fund expenses'],
+      ['Monthly Expense', `$${monthlyExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Monthly accrued expenses'],
+      ['Prior Pre-Fee NAV', `$${priorPreFeeNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Previous period pre-fee NAV'],
+      ['Net Flows', `$${netFlows.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Deposits/withdrawals since prior period (negative = withdrawal)'],
+      ['Hurdle Rate', `${hurdleRate}%`, 'Minimum return threshold for performance fees'],
+      ['High Water Mark', `$${highWaterMark.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Historical peak NAV for performance calculation'],
+      ['Performance Fee Rate', `${(performanceFeeRate * 100).toFixed(1)}%`, 'Percentage of excess performance charged as fee'],
+      ['Accrued Performance Fee Rate', `${(accruedPerformanceFeeRate * 100).toFixed(1)}%`, 'Percentage of dividends charged as performance fee']
     ];
 
     // Create workbook
