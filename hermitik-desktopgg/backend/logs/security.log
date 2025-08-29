@@ -340,3 +340,17 @@
 {"duration":"20ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-25 15:15:01","url":"/api/ai/health"}
 {"duration":"25ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-25 15:15:01","url":"/api/ai/chat"}
 {"duration":"0ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-25 15:15:01","url":"/api/ai/generate-nav-report"}
+{"duration":"12ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-28 20:47:35","url":"/api/nav"}
+{"duration":"10044ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":500,"timestamp":"2025-08-28 20:48:15","url":"/api/auth/login"}
+{"duration":"10086ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":500,"timestamp":"2025-08-28 20:49:55","url":"/api/auth/login"}
+{"duration":"10010ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":500,"timestamp":"2025-08-28 20:50:51","url":"/api/auth/login"}
+{"duration":"10015ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":500,"timestamp":"2025-08-28 20:52:21","url":"/api/auth/login"}
+{"duration":"10024ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":500,"timestamp":"2025-08-28 20:52:40","url":"/api/auth/login"}
+{"duration":"37ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-28 20:55:58","url":"/api/nav"}
+{"duration":"1ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-28 20:55:58","url":"/api/nav"}
+{"duration":"2ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-28 20:57:12","url":"/api/nav"}
+{"duration":"0ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":401,"timestamp":"2025-08-28 20:57:12","url":"/api/nav"}
+{"duration":"295ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"POST","service":"hermetik-backend","statusCode":500,"timestamp":"2025-08-28 20:57:12","url":"/api/auth/login"}
+{"duration":"32ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":400,"timestamp":"2025-08-28 20:57:16","url":"/api/wallet/wallets"}
+{"duration":"13ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":400,"timestamp":"2025-08-28 20:57:17","url":"/api/wallet/wallets"}
+{"duration":"7ms","ip":"::1","level":"warn","message":"REQUEST_ERROR","method":"GET","service":"hermetik-backend","statusCode":400,"timestamp":"2025-08-28 20:57:35","url":"/api/wallet/wallets"}

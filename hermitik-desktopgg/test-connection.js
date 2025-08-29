@@ -16,11 +16,11 @@ async function testConnection() {
     console.log('\n2. Testing login endpoint...');
     const loginResponse = await axios.post(`${API_BASE}/auth/login`, {
       email: 'admin@example.com',
-      password: 'admin123'
+      password: 'password123'
     });
-    console.log('✅ Login successful:', loginResponse.data.user.name);
+    console.log('✅ Login successful:', loginResponse.data.data.user.name);
     
-    const token = loginResponse.data.token;
+    const token = loginResponse.data.data.token;
     
     // Test 3: Protected endpoint
     console.log('\n3. Testing protected endpoint...');
