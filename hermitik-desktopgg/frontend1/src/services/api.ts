@@ -7,9 +7,9 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use local backend URL for development
-const API_BASE_URL = 'http://localhost:3001/api';
-const USE_MOCK_API = true; // Use mock API for demo
+// Use direct backend URL
+const API_BASE_URL = 'http://23.20.137.235:3001/api';
+const USE_MOCK_API = false; // Use real API
 
 // Force mock mode for demo purposes
 console.log('🔧 API Configuration:', { USE_MOCK_API, API_BASE_URL });

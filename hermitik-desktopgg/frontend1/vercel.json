@@ -20,7 +20,7 @@
       }
     ],
     "env": {
-      "VITE_API_BASE_URL": "/api",
+      "VITE_API_BASE_URL": "https://cors-anywhere.herokuapp.com/http://23.20.137.235:3001/api",
       "VITE_USE_MOCK_API": "false"
     }
   }
