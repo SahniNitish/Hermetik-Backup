@@ -7,9 +7,9 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use environment variable or fallback to proxy
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === 'true' || false;
+// Use local backend URL for development
+const API_BASE_URL = 'http://localhost:3001/api';
+const USE_MOCK_API = true; // Use mock API for demo
 
 // Force mock mode for demo purposes
 console.log('🔧 API Configuration:', { USE_MOCK_API, API_BASE_URL });
