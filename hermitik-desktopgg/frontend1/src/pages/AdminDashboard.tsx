@@ -31,7 +31,7 @@ const AdminDashboard: React.FC = () => {
       
       try {
         // Force real API usage for admin dashboard
-        const API_BASE_URL = 'http://23.20.137.235:3001/api';
+        const API_BASE_URL = '/api/proxy';
         const response = await fetch(`${API_BASE_URL}/analytics/admin/dashboard`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`
@@ -79,7 +79,7 @@ const AdminDashboard: React.FC = () => {
         </p>
         <div className="mt-4 p-4 bg-gray-800 rounded-lg text-left">
           <p className="text-sm text-gray-300">Debug Info:</p>
-          <p className="text-xs text-gray-400">API URL: http://23.20.137.235:3001/api (Forced Real API)</p>
+          <p className="text-xs text-gray-400">API URL: /api/proxy (Vercel Proxy to Backend)</p>
           <p className="text-xs text-gray-400">Token: {localStorage.getItem('access_token') ? 'Present' : 'Missing'}</p>
         </div>
       </div>
@@ -92,7 +92,7 @@ const AdminDashboard: React.FC = () => {
         <p className="text-gray-400">No admin dashboard data available</p>
         <div className="mt-4 p-4 bg-gray-800 rounded-lg text-left">
           <p className="text-sm text-gray-300">Debug Info:</p>
-          <p className="text-xs text-gray-400">API URL: http://23.20.137.235:3001/api (Forced Real API)</p>
+          <p className="text-xs text-gray-400">API URL: /api/proxy (Vercel Proxy to Backend)</p>
           <p className="text-xs text-gray-400">Token: {localStorage.getItem('access_token') ? 'Present' : 'Missing'}</p>
         </div>
       </div>

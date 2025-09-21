@@ -7,8 +7,8 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use production backend URL
-const API_BASE_URL = 'http://23.20.137.235:3001/api';
+// Use Vercel proxy to backend
+const API_BASE_URL = '/api/proxy';
 const USE_MOCK_API = false; // Use real API for production
 
 // Force mock mode for demo purposes
