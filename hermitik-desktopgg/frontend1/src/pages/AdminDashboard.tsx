@@ -31,7 +31,7 @@ const AdminDashboard: React.FC = () => {
       
       try {
         // Force real API usage for admin dashboard
-        const API_BASE_URL = 'https://corsproxy.io/?http://23.20.137.235:3001/api';
+        const API_BASE_URL = 'https://api.allorigins.win/raw?url=http://23.20.137.235:3001/api';
         const response = await fetch(`${API_BASE_URL}/analytics/admin/dashboard`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`

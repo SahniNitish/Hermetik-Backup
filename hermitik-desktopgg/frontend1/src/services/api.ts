@@ -7,8 +7,8 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use CORS proxy to avoid ngrok restrictions
-const API_BASE_URL = 'https://corsproxy.io/?http://23.20.137.235:3001/api';
+// Use CORS proxy to avoid mixed content issues
+const API_BASE_URL = 'https://api.allorigins.win/raw?url=http://23.20.137.235:3001/api';
 const USE_MOCK_API = false; // Use real API
 
 // Force mock mode for demo purposes
