@@ -31,7 +31,7 @@ const AdminDashboard: React.FC = () => {
       
       try {
         // Force real API usage for admin dashboard
-        const API_BASE_URL = 'http://23.20.137.235:3001/api';
+        const API_BASE_URL = 'https://bf8259de7bac.ngrok-free.app/api';
         const response = await fetch(`${API_BASE_URL}/analytics/admin/dashboard`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`

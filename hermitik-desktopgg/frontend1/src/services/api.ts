@@ -7,8 +7,8 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use direct backend URL
-const API_BASE_URL = 'http://23.20.137.235:3001/api';
+// Use ngrok HTTPS tunnel to backend
+const API_BASE_URL = 'https://bf8259de7bac.ngrok-free.app/api';
 const USE_MOCK_API = false; // Use real API
 
 // Force mock mode for demo purposes
