@@ -7,9 +7,9 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use Vercel proxy to backend
-const API_BASE_URL = '/api';
-const USE_MOCK_API = false; // Use real API for production
+// Use environment variable or fallback to proxy
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const USE_MOCK_API = import.meta.env.VITE_USE_MOCK_API === 'true' || false;
 
 // Force mock mode for demo purposes
 console.log('🔧 API Configuration:', { USE_MOCK_API, API_BASE_URL });
