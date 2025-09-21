@@ -7,8 +7,12 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
-const USE_MOCK_API = false; // Force use of real API
+// Use local backend URL for development
+const API_BASE_URL = 'http://localhost:3001/api';
+const USE_MOCK_API = true; // Use mock API for demo
+
+// Force mock mode for demo purposes
+console.log('🔧 API Configuration:', { USE_MOCK_API, API_BASE_URL });
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -336,5 +340,13 @@ export const authApi = USE_MOCK_API ? mockAuthApi : realAuthApi;
 export const walletApi = USE_MOCK_API ? mockWalletApi : realWalletApi;
 export const analyticsApi = USE_MOCK_API ? mockAnalyticsApi : realAnalyticsApi;
 export const adminApi = USE_MOCK_API ? mockAdminApi : realAdminApi;
+
+// Debug logging
+console.log('🔧 API Exports:', { 
+  authApi: USE_MOCK_API ? 'MOCK' : 'REAL',
+  walletApi: USE_MOCK_API ? 'MOCK' : 'REAL',
+  analyticsApi: USE_MOCK_API ? 'MOCK' : 'REAL',
+  adminApi: USE_MOCK_API ? 'MOCK' : 'REAL'
+});
 
 export default api;

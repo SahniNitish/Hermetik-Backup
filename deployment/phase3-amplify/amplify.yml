@@ -1,0 +1,21 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd hermitik-desktopgg/frontend1
+        - npm ci
+        - echo "Building Hermetik Dashboard for production..."
+    build:
+      commands:
+        - npm run build
+        - echo "Build completed successfully!"
+  artifacts:
+    baseDirectory: hermitik-desktopgg/frontend1/dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - hermitik-desktopgg/frontend1/node_modules/**/*
+
+

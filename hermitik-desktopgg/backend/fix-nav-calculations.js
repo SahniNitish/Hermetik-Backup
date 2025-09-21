@@ -144,8 +144,13 @@ async function createSampleNAVSetting(userId, year, month) {
     const hurdleRate = 0;
     const highWaterMark = 0;
     const performanceFee = 0; // No performance fee if hurdle not met
-    const accruedPerformanceFees = dividendsReceivable * 0.25; // 25% of dividends
-    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
+    const accruedPerformanceFees = dividendsReceivable * 0.05; // 5% of dividends
+    
+    // Management fee calculation (0.5% of total assets)
+    const managementFeeRate = 0.005; // 0.5%
+    const managementFee = totalAssets * managementFeeRate;
+    
+    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees - managementFee;
     
     const navSetting = new NAVSettings({
       userId,

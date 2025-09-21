@@ -19,6 +19,7 @@ const MOCK_USER_KEY = 'mock_current_user';
 
 export const mockAuthApi = {
   login: async (username: string, password: string): Promise<AuthResponse> => {
+    console.log('🎭 MOCK API: Login attempt for:', username);
     await delay(800); // Simulate network delay
     
     const user = findUserByCredentials(username, password);

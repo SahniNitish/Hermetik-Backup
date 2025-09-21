@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Config Test</title>
+</head>
+<body>
+    <h1>API Configuration Test</h1>
+    <div id="result"></div>
+    
+    <script type="module">
+        // Test the API configuration
+        const result = document.getElementById('result');
+        
+        try {
+            // Import the API configuration
+            const { default: api } = await import('./src/services/api.ts');
+            
+            result.innerHTML = `
+                <h2>✅ API Configuration Loaded</h2>
+                <p><strong>Base URL:</strong> ${api.defaults.baseURL}</p>
+                <p><strong>Headers:</strong> ${JSON.stringify(api.defaults.headers)}</p>
+            `;
+        } catch (error) {
+            result.innerHTML = `
+                <h2>❌ Error Loading API Config</h2>
+                <p><strong>Error:</strong> ${error.message}</p>
+            `;
+        }
+    </script>
+</body>
+</html>
+
+

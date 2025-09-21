@@ -294,8 +294,9 @@ router.get('/nav-settings/:userId/:year/:month', auth, async (req, res) => {
         feeSettings: {
           annualExpense: 600,
           monthlyExpense: 50,
-          performanceFeeRate: 0.25,
-          accruedPerformanceFeeRate: 0.25,
+          performanceFeeRate: 0.05,
+          accruedPerformanceFeeRate: 0.05,
+          managementFeeRate: 0.005,
           hurdleRate: 0,
           highWaterMark: 0
         },
@@ -1219,9 +1220,14 @@ router.get('/export', auth, async (req, res) => {
     // Performance calculation
     // Performance = Current NAV - Prior NAV + Net Flows
     const performance = preFeeNav - priorPreFeeNav + netFlows;
-    const performanceFee = performance > hurdleRate ? performance * 0.25 : 0;
-    const accruedPerformanceFees = dividendsReceivable * 0.25; // 25% of Dividends
-    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
+    const performanceFee = performance > hurdleRate ? performance * 0.05 : 0;
+    const accruedPerformanceFees = dividendsReceivable * 0.05; // 5% of Dividends
+    
+    // Management fee calculation (0.5% of total assets)
+    const managementFeeRate = 0.005; // 0.5%
+    const managementFee = totalAssets * managementFeeRate;
+    
+    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees - managementFee;
 
     console.log(`📊 NAV Calculations:
   Total Assets: $${totalAssets.toFixed(2)}
@@ -1230,6 +1236,7 @@ router.get('/export', auth, async (req, res) => {
   Performance: $${performance.toFixed(2)}
   Performance Fee: $${performanceFee.toFixed(2)}
   Accrued Performance Fees: $${accruedPerformanceFees.toFixed(2)}
+  Management Fee: $${managementFee.toFixed(2)}
   Net Assets: $${netAssets.toFixed(2)}`);
 
     // Create NAV report data (first sheet)
@@ -1254,6 +1261,7 @@ router.get('/export', auth, async (req, res) => {
       ['', 'Other liabilities', 0],
       ['Total Liabilities', '', totalLiabilities],
       ['', 'Pre-Fee Ending NAV', preFeeNav],
+      ['', 'Management fee', managementFee],
       ['', 'Accrued performance fees', accruedPerformanceFees],
       ['', 'NET ASSETS', netAssets],
       [''],
@@ -1290,8 +1298,9 @@ router.get('/export', auth, async (req, res) => {
       ['', 'Other liabilities', 0, 'Miscellaneous', ''],
       ['Total Liabilities', '', totalLiabilities, '', 'Sum of Liabilities'],
       ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Total Assets - Accrued Expenses'],
+      ['', 'Management fee', managementFee, 'Management fee on total assets', `$${managementFee.toFixed(2)} (0.5% of total assets)`],
       ['', 'Accrued performance fees', accruedPerformanceFees, 'Performance fee on dividends', `$${performanceFee.toFixed(2)} per month`],
-      ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Performance Fee - Accrued Performance Fees'],
+      ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Management Fee - Performance Fee - Accrued Performance Fees'],
       [''],
       ['PERFORMANCE FEE CALCULATION'],
       ['', 'Prior period Pre-Fee Ending NAV', priorPreFeeNav, '', 'Pre-Fee Ending NAV from prior period'],
@@ -1301,7 +1310,8 @@ router.get('/export', auth, async (req, res) => {
       ['', 'Hurdle Rate', hurdleRate, 'Performance threshold', ''],
       ['', 'High Water Mark', highWaterMark, 'Performance threshold', ''],
       ['', 'Performance Fee', performanceFee, 'Performance fee on excess returns', 'If Performance > Hurdle, (Performance - Hurdle) * Rate'],
-      ['', 'Accrued Performance Fees', accruedPerformanceFees, 'Performance fee on dividends', `$${accruedPerformanceFees.toFixed(2)} per month`]
+      ['', 'Accrued Performance Fees', accruedPerformanceFees, 'Performance fee on dividends', `$${accruedPerformanceFees.toFixed(2)} per month`],
+      ['', 'Management Fee', managementFee, 'Management fee on total assets', `$${managementFee.toFixed(2)} (0.5% of total assets)`]
     ];
 
     // Add custom parameters sheet
@@ -1828,5 +1838,274 @@ router.get('/admin/users/ranking', auth, catchAsync(async (req, res) => {
     });
   }
 }));
+
+// Export NAV calculator data (for current month calculations)
+router.get('/export/nav-calculator', auth, async (req, res) => {
+  try {
+    const { 
+      userId, 
+      annualExpense, 
+      monthlyExpense, 
+      priorPreFeeNav, 
+      netFlows, 
+      hurdleRate, 
+      hurdleRateType, 
+      highWaterMark, 
+      performanceFeeRate, 
+      accruedPerformanceFeeRate, 
+      managementFeeRate,
+      feePaymentStatus, 
+      partialPaymentAmount 
+    } = req.query;
+    
+    // Admin access check - NAV Calculator is admin-only functionality
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    
+    console.log(`📊 Exporting NAV calculator report for user: ${userId}`);
+    
+    // Parse numeric parameters
+    const parsedParams = {
+      annualExpense: parseFloat(annualExpense) || 600,
+      monthlyExpense: parseFloat(monthlyExpense) || 50,
+      priorPreFeeNav: parseFloat(priorPreFeeNav) || 0,
+      netFlows: parseFloat(netFlows) || 0,
+      hurdleRate: parseFloat(hurdleRate) || 0,
+      hurdleRateType: hurdleRateType || 'annual',
+      highWaterMark: parseFloat(highWaterMark) || 0,
+      performanceFeeRate: parseFloat(performanceFeeRate) || 0.05,
+      accruedPerformanceFeeRate: parseFloat(accruedPerformanceFeeRate) || 0.05,
+      managementFeeRate: parseFloat(managementFeeRate) || 0.005,
+      feePaymentStatus: feePaymentStatus || 'not_paid',
+      partialPaymentAmount: parseFloat(partialPaymentAmount) || 0
+    };
+    
+    // Get current portfolio data for the user
+    const User = require('../models/User');
+    const WalletData = require('../models/WalletData');
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Get current portfolio value from stored wallet data
+    let totalInvestments = 0;
+    let totalRewards = 0;
+    
+    if (user.wallets && user.wallets.length > 0) {
+      // Get the most recent stored wallet data
+      const storedWallets = await WalletData.find({ 
+        userId: userId,
+        walletAddress: { $in: user.wallets },
+        $or: [
+          { 'tokens.0': { $exists: true } },
+          { 'protocols.0': { $exists: true } }
+        ]
+      }).sort({ timestamp: -1 });
+      
+      // Calculate total portfolio value
+      storedWallets.forEach(wallet => {
+        // Sum token values
+        if (wallet.tokens) {
+          wallet.tokens.forEach(token => {
+            totalInvestments += token.usd_value || 0;
+          });
+        }
+        
+        // Sum protocol values
+        if (wallet.protocols) {
+          wallet.protocols.forEach(protocol => {
+            totalInvestments += protocol.net_usd_value || 0;
+            
+            // Sum rewards from protocols
+            if (protocol.portfolio_item_list) {
+              protocol.portfolio_item_list.forEach(item => {
+                if (item.detail?.reward_token_list) {
+                  item.detail.reward_token_list.forEach(reward => {
+                    totalRewards += (reward.amount || 0) * (reward.price || 0);
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    // If no stored data, use fallback values
+    if (totalInvestments === 0) {
+      totalInvestments = 100000; // Fallback value
+      totalRewards = 5000; // Fallback value
+    }
+    
+    // Calculate NAV values
+    const investments = totalInvestments;
+    const dividendsReceivable = totalRewards;
+    const totalAssets = investments + dividendsReceivable;
+    const accruedExpenses = parsedParams.monthlyExpense;
+    const totalLiabilities = accruedExpenses;
+    const preFeeNav = totalAssets - accruedExpenses;
+    
+    // Performance calculation
+    const performance = preFeeNav - parsedParams.priorPreFeeNav + parsedParams.netFlows;
+    
+    // Fee calculations
+    let hurdleAmount = 0;
+    if (parsedParams.hurdleRate > 0 && parsedParams.priorPreFeeNav > 0) {
+      if (parsedParams.hurdleRateType === 'annual') {
+        hurdleAmount = (parsedParams.hurdleRate / 100 / 12) * parsedParams.priorPreFeeNav;
+      } else {
+        hurdleAmount = (parsedParams.hurdleRate / 100) * parsedParams.priorPreFeeNav;
+      }
+    }
+    
+    const performanceFee = performance > hurdleAmount ? (performance - hurdleAmount) * parsedParams.performanceFeeRate : 0;
+    const accruedPerformanceFees = dividendsReceivable * parsedParams.accruedPerformanceFeeRate;
+    const managementFee = totalAssets * parsedParams.managementFeeRate;
+    
+    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees - managementFee;
+    
+    // Create NAV report data
+    const currentDate = new Date();
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                       'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthName = monthNames[currentDate.getMonth()];
+    const year = currentDate.getFullYear();
+    const valuationDate = `${monthName} ${year}`;
+    
+    const navData = [
+      ['VALUATION DATE', valuationDate],
+      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
+      ['For more information on valuation methodology please see the Investment Management Agreement.'],
+      [''],
+      ['Section', 'Line Item', 'Value'],
+      ['ASSETS'],
+      ['', 'Investments at fair value (securities)', investments],
+      ['', 'Cash & cash equivalents', 0],
+      ['', 'Dividends and interest receivable', dividendsReceivable],
+      ['', 'Receivables for investments sold', 0],
+      ['', 'Other assets', 0],
+      ['Total Assets', '', totalAssets],
+      ['LIABILITIES'],
+      ['', 'Payables for investments purchased', 0],
+      ['', 'Accrued management fees', 0],
+      ['', 'Accrued fund expenses', accruedExpenses],
+      ['', 'Distribution payable', 0],
+      ['', 'Other liabilities', 0],
+      ['Total Liabilities', '', totalLiabilities],
+      ['', 'Pre-Fee Ending NAV', preFeeNav],
+      ['', 'Management fee', managementFee],
+      ['', 'Accrued performance fees', accruedPerformanceFees],
+      ['', 'NET ASSETS', netAssets],
+      [''],
+      ['PERFORMANCE FEE CALCULATION'],
+      ['', 'Prior period Pre-Fee Ending NAV', parsedParams.priorPreFeeNav],
+      ['', 'Net Flows', parsedParams.netFlows],
+      ['', 'Current period Pre-Fee Ending NAV', preFeeNav],
+      ['', 'Performance', performance],
+      ['', 'Hurdle Rate', parsedParams.hurdleRate],
+      ['', 'High Water Mark', parsedParams.highWaterMark],
+      ['', 'Performance Fee', performanceFee],
+      ['', 'Accrued Performance Fees', accruedPerformanceFees],
+      ['', 'Management Fee', managementFee]
+    ];
+    
+    // Create annotated NAV report data (second sheet)
+    const navAnnotatedData = [
+      ['VALUATION DATE', valuationDate],
+      ['All values in USD as of 12:00 pm UTC on the Valuation date.'],
+      ['For more information on valuation methodology please see the Investment Management Agreement.'],
+      [''],
+      ['Section', 'Line Item', 'Value', 'Notes', 'Calculation'],
+      ['ASSETS'],
+      ['', 'Investments at fair value (securities)', investments, 'Closing price as of NAV day', 'Sum of Tokens, Positions'],
+      ['', 'Cash & cash equivalents', 0, 'Bank, money market, etc.', ''],
+      ['', 'Dividends and interest receivable', dividendsReceivable, 'Accrued income not yet received', 'Sum of Unclaimed Rewards'],
+      ['', 'Receivables for investments sold', 0, 'Pending settlements', ''],
+      ['', 'Other assets', 0, 'Prepaids, misc.', ''],
+      ['Total Assets', '', totalAssets, '', 'Sum of Assets'],
+      ['LIABILITIES'],
+      ['', 'Payables for investments purchased', 0, 'Pending settlements', ''],
+      ['', 'Accrued management fees', 0, 'Not yet paid, accrues each period until paid', ''],
+      ['', 'Accrued fund expenses', accruedExpenses, 'Custom monthly expense amount', `$${parsedParams.monthlyExpense} per month`],
+      ['', 'Distribution payable', 0, 'Dividends/interest owed to holders', ''],
+      ['', 'Other liabilities', 0, 'Miscellaneous', ''],
+      ['Total Liabilities', '', totalLiabilities, '', 'Sum of Liabilities'],
+      ['', 'Pre-Fee Ending NAV', preFeeNav, '', 'Total Assets - Accrued Expenses'],
+      ['', 'Management fee', managementFee, 'Management fee on total assets', `$${managementFee.toFixed(2)} (${(parsedParams.managementFeeRate * 100).toFixed(2)}% of total assets)`],
+      ['', 'Accrued performance fees', accruedPerformanceFees, 'Performance fee on dividends', `$${accruedPerformanceFees.toFixed(2)} (${(parsedParams.accruedPerformanceFeeRate * 100).toFixed(2)}% of dividends)`],
+      ['', 'NET ASSETS', netAssets, '(Net Asset Value)', 'Pre-Fee NAV - Management Fee - Performance Fee - Accrued Performance Fees'],
+      [''],
+      ['PERFORMANCE FEE CALCULATION'],
+      ['', 'Prior period Pre-Fee Ending NAV', parsedParams.priorPreFeeNav, '', 'Pre-Fee Ending NAV from prior period'],
+      ['', 'Net Flows', parsedParams.netFlows, '', 'Deposits/withdrawals since prior period'],
+      ['', 'Current period Pre-Fee Ending NAV', preFeeNav, '', 'Pre-Fee Ending NAV from current period'],
+      ['', 'Performance', performance, '', 'Current Pre-Fee NAV - Prior Pre-Fee NAV - Net Flows'],
+      ['', 'Hurdle Rate', parsedParams.hurdleRate, 'Performance threshold', ''],
+      ['', 'High Water Mark', parsedParams.highWaterMark, 'Performance threshold', ''],
+      ['', 'Performance Fee', performanceFee, 'Performance fee on excess returns', 'If Performance > Hurdle, (Performance - Hurdle) * Rate'],
+      ['', 'Accrued Performance Fees', accruedPerformanceFees, 'Performance fee on dividends', `$${accruedPerformanceFees.toFixed(2)} (${(parsedParams.accruedPerformanceFeeRate * 100).toFixed(2)}% of dividends)`],
+      ['', 'Management Fee', managementFee, 'Management fee on total assets', `$${managementFee.toFixed(2)} (${(parsedParams.managementFeeRate * 100).toFixed(2)}% of total assets)`]
+    ];
+    
+    // Create parameters sheet
+    const parametersData = [
+      ['NAV CALCULATOR PARAMETERS'],
+      [''],
+      ['Parameter', 'Value', 'Description'],
+      ['Annual Expense', `$${parsedParams.annualExpense}`, 'Annual fund expenses'],
+      ['Monthly Expense', `$${parsedParams.monthlyExpense}`, 'Monthly fund expenses'],
+      ['Performance Fee Rate', `${(parsedParams.performanceFeeRate * 100).toFixed(2)}%`, 'Performance fee on excess returns'],
+      ['Accrued Performance Fee Rate', `${(parsedParams.accruedPerformanceFeeRate * 100).toFixed(2)}%`, 'Performance fee on dividends'],
+      ['Management Fee Rate', `${(parsedParams.managementFeeRate * 100).toFixed(2)}%`, 'Management fee on total assets'],
+      ['Hurdle Rate', `${parsedParams.hurdleRate.toFixed(2)}%`, 'Performance threshold'],
+      ['Hurdle Rate Type', parsedParams.hurdleRateType, 'Annual or monthly hurdle'],
+      ['High Water Mark', `$${parsedParams.highWaterMark}`, 'Performance threshold'],
+      ['Fee Payment Status', parsedParams.feePaymentStatus, 'Current payment status'],
+      ['Partial Payment Amount', `$${parsedParams.partialPaymentAmount}`, 'Amount partially paid']
+    ];
+    
+    // Create Excel workbook
+    const XLSX = require('xlsx');
+    const workbook = XLSX.utils.book_new();
+    
+    // Add NAV data sheet
+    const navWorksheet = XLSX.utils.aoa_to_sheet(navData);
+    XLSX.utils.book_append_sheet(workbook, navWorksheet, `NAV Report - ${monthName} ${year}`);
+    
+    // Add annotated NAV data sheet
+    const annotatedWorksheet = XLSX.utils.aoa_to_sheet(navAnnotatedData);
+    XLSX.utils.book_append_sheet(workbook, annotatedWorksheet, `NAV Report - ${monthName} ${year} - Notes`);
+    
+    // Add parameters sheet
+    const paramsWorksheet = XLSX.utils.aoa_to_sheet(parametersData);
+    XLSX.utils.book_append_sheet(workbook, paramsWorksheet, `Parameters - ${monthName} ${year}`);
+    
+    // Generate buffer
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: false });
+    
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Generated Excel buffer is empty');
+    }
+    
+    // Set headers
+    const userName = user.name.replace(/\s+/g, '_');
+    const filename = `${userName}_NAV_Calculator_Report_${year}_${String(currentDate.getMonth() + 1).padStart(2, '0')}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Pragma', 'no-cache');
+    
+    console.log(`✅ NAV calculator report exported: ${filename} (${buffer.length} bytes)`);
+    res.send(buffer);
+    
+  } catch (error) {
+    console.error('❌ Error generating NAV calculator report:', error.message);
+    res.status(500).json({ error: 'Failed to generate NAV calculator report', details: error.message });
+  }
+});
 
 module.exports = router;

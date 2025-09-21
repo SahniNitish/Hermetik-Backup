@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>S3 Assets Test</title>
+</head>
+<body>
+    <h1>S3 Assets Test</h1>
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        // Test CSS loading
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = './assets/index-CjX7i3C6.css';
+        cssLink.onload = () => {
+            results.innerHTML += '<p>✅ CSS loaded successfully</p>';
+        };
+        cssLink.onerror = () => {
+            results.innerHTML += '<p>❌ CSS failed to load</p>';
+        };
+        document.head.appendChild(cssLink);
+        
+        // Test JS loading
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = './assets/index-CzbIkIxM.js';
+        script.onload = () => {
+            results.innerHTML += '<p>✅ JavaScript loaded successfully</p>';
+        };
+        script.onerror = (error) => {
+            results.innerHTML += '<p>❌ JavaScript failed to load: ' + error.message + '</p>';
+        };
+        document.head.appendChild(script);
+        
+        // Test backend connection
+        fetch('http://23.20.137.235:3001/api/health')
+            .then(response => response.json())
+            .then(data => {
+                results.innerHTML += '<p>✅ Backend connected: ' + data.status + '</p>';
+            })
+            .catch(error => {
+                results.innerHTML += '<p>❌ Backend error: ' + error.message + '</p>';
+            });
+    </script>
+</body>
+</html>

@@ -111,6 +111,22 @@ export const mockUsers: MockUser[] = [
     password: 'hermetik123',
     created_at: '2025-08-04T22:37:48.080Z',
     role: 'user'
+  },
+  {
+    id: '9',
+    username: 'Alice',
+    email: 'alice@example.com',
+    password: 'alice123',
+    created_at: '2025-08-05T10:00:00.000Z',
+    role: 'user'
+  },
+  {
+    id: '10',
+    username: 'Bob',
+    email: 'bob@example.com',
+    password: 'bob123',
+    created_at: '2025-08-05T10:00:00.000Z',
+    role: 'user'
   }
 ];
 
@@ -760,7 +776,9 @@ export const userWallets: { [userId: string]: string[] } = {
   '5': ['0xbfa2ef4cab56ace20a4e11bb6080a09d126bf5cd', '0xE71Aa6f45A22Fa1e4C9fB29960248f4A3d4af918'], // Brian Robertson (both wallets)
   '6': ['0xb046086f7b6d74a3498d2b994904233ad3246ddc'], // Gary Baron
   '7': ['0x99b3c496751c5c49a58e99cd0f8bd7242fd6284f'], // Lars Kluge
-  '8': ['0x6e1cfdbd65676c9588e4aee278008ff48b986074', '0x2F6C914A6DfA61893FF86e05A30Ce0Dc6065fFF1'] // Hermetik (both wallets)
+  '8': ['0x6e1cfdbd65676c9588e4aee278008ff48b986074', '0x2F6C914A6DfA61893FF86e05A30Ce0Dc6065fFF1'], // Hermetik (both wallets)
+  '9': ['0x742d35Cc6634C0532925a3b8D4C9db96C4b4d8b1'], // Alice - same as admin for demo
+  '10': ['0xbfa2ef4cab56ace20a4e11bb6080a09d126bf5cd'] // Bob - one wallet for demo
 };
 
 // Helper function to get wallets for a user

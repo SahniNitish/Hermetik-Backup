@@ -90,7 +90,12 @@ async function createNAVForUser(userId, userName, year, month, portfolioValues) 
     
     const performanceFee = performance > hurdleAmount ? (performance - hurdleAmount) * performanceFeeRate : 0;
     const accruedPerformanceFees = dividendsReceivable * accruedPerformanceFeeRate;
-    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
+    
+    // Management fee calculation (0.5% of total assets)
+    const managementFeeRate = 0.005; // 0.5%
+    const managementFee = totalAssets * managementFeeRate;
+    
+    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees - managementFee;
 
     // Update the NAV setting
     navSetting.portfolioData = portfolioData;

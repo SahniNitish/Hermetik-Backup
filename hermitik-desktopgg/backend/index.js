@@ -26,8 +26,11 @@ const { requestLogger } = require('./utils/logger');
 
 const app = express();
 
-// Apply security headers FIRST
+// Apply HTTPS redirect and security headers FIRST
+const { httpsRedirect, secureHeaders } = require('./middleware/httpsRedirect');
+app.use(httpsRedirect);
 app.use(securityHeaders);
+app.use(secureHeaders);
 
 // Performance monitoring
 app.use(performanceMonitor);
@@ -45,14 +48,43 @@ app.use(responseCompression);
 // Security logging
 app.use(securityLogger);
 
-// CORS configuration - simplified for development
+// CORS configuration - production ready
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5174', // Development
+  'http://localhost:3000', // Development alternative
+  // Add CloudFront and S3 URLs when available
+  /^https:\/\/.*\.cloudfront\.net$/,
+  /^https:\/\/.*\.s3-website-.*\.amazonaws\.com$/
+];
+
 app.use(cors({
-  origin: true, // Allow all origins in development
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list or matches pattern
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (typeof allowedOrigin === 'string') {
+        return allowedOrigin === origin;
+      } else if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['X-Cache', 'X-Response-Time', 'X-Memory-Used'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+  optionsSuccessStatus: 200
 }));
 
 // Body parsing with size limits

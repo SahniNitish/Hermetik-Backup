@@ -31,7 +31,17 @@ const userSchema = new mongoose.Schema({
     default: [],
     validate: {
       validator: function(wallets) {
-        return wallets.every(wallet => /^0x[a-fA-F0-9]{40}$/.test(wallet));
+        // Allow empty arrays
+        if (!wallets || wallets.length === 0) {
+          return true;
+        }
+        // Check that all non-empty wallet addresses are valid
+        return wallets.every(wallet => {
+          if (!wallet || wallet.trim() === '') {
+            return true; // Allow empty strings
+          }
+          return /^0x[a-fA-F0-9]{40}$/.test(wallet);
+        });
       },
       message: 'All wallet addresses must be valid Ethereum addresses'
     }

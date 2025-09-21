@@ -1,0 +1,28 @@
+[Unit]
+Description=Hermetik Dashboard Backend
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/hermetik-backend
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PORT=3001
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/ec2-user/hermetik-backend/logs
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermetik-backend
+
+[Install]
+WantedBy=multi-user.target

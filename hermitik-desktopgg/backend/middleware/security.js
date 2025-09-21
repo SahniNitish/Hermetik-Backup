@@ -131,8 +131,19 @@ const sanitizeBody = (req, res, next) => {
   if (req.body) {
     for (let key in req.body) {
       if (typeof req.body[key] === 'object' && req.body[key] !== null) {
-        // Convert objects to strings to prevent NoSQL injection
-        req.body[key] = JSON.stringify(req.body[key]);
+        // Only convert plain objects to strings, keep arrays as arrays
+        if (Array.isArray(req.body[key])) {
+          // Keep arrays as arrays, but validate their contents
+          req.body[key] = req.body[key].map(item => {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+              return JSON.stringify(item);
+            }
+            return item;
+          });
+        } else {
+          // Convert plain objects to strings to prevent NoSQL injection
+          req.body[key] = JSON.stringify(req.body[key]);
+        }
       }
     }
   }

@@ -22,6 +22,7 @@ interface CalculationParams {
   highWaterMark: number;
   performanceFeeRate: number;
   accruedPerformanceFeeRate: number;
+  managementFeeRate: number;
   feePaymentStatus: 'paid' | 'not_paid' | 'partially_paid';
   partialPaymentAmount: number;
   priorPreFeeNavSource: 'manual' | 'auto_loaded' | 'fallback' | 'portfolio_estimate';
@@ -99,8 +100,9 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
     hurdleRate: 0,
     hurdleRateType: 'annual',
     highWaterMark: 0,
-    performanceFeeRate: 0.25,
-    accruedPerformanceFeeRate: 0.25,
+    performanceFeeRate: 0.05,
+    accruedPerformanceFeeRate: 0.05,
+    managementFeeRate: 0.005,
     feePaymentStatus: 'not_paid',
     partialPaymentAmount: 0,
     priorPreFeeNavSource: 'manual'
@@ -382,7 +384,10 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
         accruedPerformanceFees = calculatedAccruedFees;
     }
     
-    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees;
+    // Management fee calculation (0.5% of total assets)
+    const managementFee = totalAssets * (safeParams.managementFeeRate || 0.005);
+    
+    const netAssets = preFeeNav - performanceFee - accruedPerformanceFees - managementFee;
 
     return {
       investments,
@@ -396,6 +401,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
       performanceFee,
       accruedPerformanceFees,
       calculatedAccruedFees, // For display purposes
+      managementFee,
       netAssets
     };
   }, [portfolioData, params]);
@@ -559,6 +565,7 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
         highWaterMark: params.highWaterMark.toString(),
         performanceFeeRate: params.performanceFeeRate.toString(),
         accruedPerformanceFeeRate: params.accruedPerformanceFeeRate.toString(),
+        managementFeeRate: params.managementFeeRate.toString(),
         feePaymentStatus: params.feePaymentStatus,
         partialPaymentAmount: params.partialPaymentAmount.toString()
       });
@@ -1495,6 +1502,28 @@ const NAVCalculator: React.FC<NAVCalculatorProps> = ({ className = '' }) => {
                   <td className="border border-gray-600 p-3 text-white">Accrued Performance Fees</td>
                   <td className="border border-gray-600 p-3 text-right text-yellow-400 font-mono">
                     ${(calculations?.accruedPerformanceFees || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr className="bg-blue-900/30 hover:bg-blue-900/40">
+                  <td className="border border-gray-600 p-3 text-gray-400"></td>
+                  <td className="border border-gray-600 p-3 text-white">
+                    Management Fee Rate
+                    <div className="text-xs text-gray-400 mt-1">
+                      <input
+                        type="number"
+                        step="0.0001"
+                        min="0"
+                        max="0.1"
+                        value={params.managementFeeRate || 0}
+                        onChange={(e) => updateParam('managementFeeRate', parseFloat(e.target.value) || 0)}
+                        className="w-16 bg-gray-700 border border-gray-500 rounded px-2 py-1 text-white text-xs"
+                        placeholder="0.005"
+                      />
+                      % of total assets
+                    </div>
+                  </td>
+                  <td className="border border-gray-600 p-3 text-right text-blue-400 font-mono">
+                    ${(calculations?.managementFee || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
               </tbody>

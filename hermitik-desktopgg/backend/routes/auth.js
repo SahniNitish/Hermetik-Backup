@@ -243,6 +243,11 @@ router.post('/create-user', auth, requireAdmin, async (req, res) => {
   // Validate wallet addresses if provided
   if (wallets && Array.isArray(wallets)) {
     for (const wallet of wallets) {
+      // Skip empty wallet addresses
+      if (!wallet || wallet.trim() === '') {
+        continue;
+      }
+      // Validate non-empty wallet addresses
       if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
         return res.status(400).json({ error: `Invalid wallet address: ${wallet}` });
       }

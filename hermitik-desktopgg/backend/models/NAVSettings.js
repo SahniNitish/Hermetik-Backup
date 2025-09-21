@@ -27,11 +27,15 @@ const NAVSettingsSchema = new mongoose.Schema({
     },
     performanceFeeRate: {
       type: Number,
-      default: 0.25
+      default: 0.05
     },
     accruedPerformanceFeeRate: {
       type: Number,
-      default: 0.25
+      default: 0.05
+    },
+    managementFeeRate: {
+      type: Number,
+      default: 0.005
     },
     hurdleRate: {
       type: Number,
