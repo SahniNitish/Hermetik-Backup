@@ -57,7 +57,7 @@ interface NAVProviderProps {
   children: ReactNode;
 }
 
-const API_BASE_URL = 'https://bf8259de7bac.ngrok-free.app/api';
+const API_BASE_URL = 'https://corsproxy.io/?http://23.20.137.235:3001/api';
 
 // API functions
 const navAPI = {
