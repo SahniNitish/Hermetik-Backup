@@ -57,7 +57,7 @@ interface NAVProviderProps {
   children: ReactNode;
 }
 
-const API_BASE_URL = '/api/proxy';
+const API_BASE_URL = '/api';
 
 // API functions
 const navAPI = {

@@ -8,7 +8,7 @@ import {
 } from './mockApi';
 
 // Use Vercel proxy to backend
-const API_BASE_URL = '/api/proxy';
+const API_BASE_URL = '/api';
 const USE_MOCK_API = false; // Use real API for production
 
 // Force mock mode for demo purposes

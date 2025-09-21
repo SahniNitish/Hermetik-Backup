@@ -11,16 +11,22 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { method, headers, body } = req;
+    const { method, headers, body, query } = req;
     
     // Remove host header to avoid conflicts
     const { host, ...cleanHeaders } = headers;
     
     // Extract the API path from the request URL
-    // req.url will be like "/api/proxy/auth/login" or "/api/proxy/nav"
-    // We need to remove "/api/proxy" and add "/api" for the backend
-    const apiPath = req.url.replace('/api/proxy', '/api');
-    const backendUrl = `http://23.20.137.235:3001${apiPath}`;
+    // req.url will be like "/api/auth/login" or "/api/nav"
+    // We need to add "/api" prefix for the backend
+    let apiPath = req.url;
+    if (!apiPath.startsWith('/api/')) {
+      apiPath = `/api${apiPath}`;
+    }
+    
+    // Add query parameters if they exist
+    const queryString = new URLSearchParams(query).toString();
+    const backendUrl = `http://23.20.137.235:3001${apiPath}${queryString ? `?${queryString}` : ''}`;
     
     console.log(`🔄 Proxying ${method} request to: ${backendUrl}`);
     console.log(`📝 Original URL: ${req.url}, API Path: ${apiPath}`);
