@@ -27,10 +27,10 @@ const { requestLogger } = require('./utils/logger');
 const app = express();
 
 // Apply HTTPS redirect and security headers FIRST
-const { httpsRedirect, secureHeaders } = require('./middleware/httpsRedirect');
-app.use(httpsRedirect);
-app.use(securityHeaders);
-app.use(secureHeaders);
+// const { httpsRedirect, secureHeaders } = require('./middleware/httpsRedirect');
+// app.use(httpsRedirect);
+// app.use(securityHeaders);
+// app.use(secureHeaders);
 
 // Performance monitoring
 app.use(performanceMonitor);
@@ -55,7 +55,9 @@ const allowedOrigins = [
   'http://localhost:3000', // Development alternative
   // Add CloudFront and S3 URLs when available
   /^https:\/\/.*\.cloudfront\.net$/,
-  /^https:\/\/.*\.s3-website-.*\.amazonaws\.com$/
+  /^https:\/\/.*\.s3-website-.*\.amazonaws\.com$/,
+  // Add Vercel domains
+  /^https:\/\/.*\.vercel\.app$/
 ];
 
 app.use(cors({
