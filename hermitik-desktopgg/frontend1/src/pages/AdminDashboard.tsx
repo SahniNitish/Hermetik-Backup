@@ -30,8 +30,8 @@ const AdminDashboard: React.FC = () => {
       console.log('🔐 ADMIN: Fetching dashboard data...');
       
       try {
-        // Force real API usage for admin dashboard
-        const API_BASE_URL = 'https://api.allorigins.win/raw?url=http://23.20.137.235:3001/api';
+        // Use CloudFront HTTPS for API
+        const API_BASE_URL = 'https://d2x6jnup74oap4.cloudfront.net/api';
         const response = await fetch(`${API_BASE_URL}/analytics/admin/dashboard`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`

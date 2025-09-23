@@ -7,12 +7,17 @@ import {
   mockAdminApi 
 } from './mockApi';
 
-// Use CORS proxy to avoid mixed content issues
-const API_BASE_URL = 'https://api.allorigins.win/raw?url=http://23.20.137.235:3001/api';
-const USE_MOCK_API = false; // Use real API
+// Use CloudFront HTTPS for API
+const API_BASE_URL = 'https://d2x6jnup74oap4.cloudfront.net/api';
+const USE_MOCK_API = false;
 
-// Force mock mode for demo purposes
-console.log('🔧 API Configuration:', { USE_MOCK_API, API_BASE_URL });
+// Debug API configuration
+console.log('🔧 API Configuration:', { 
+  USE_MOCK_API, 
+  API_BASE_URL,
+  VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
+  VITE_USE_MOCK_API: import.meta.env.VITE_USE_MOCK_API
+});
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -51,9 +56,15 @@ const realAuthApi = {
     const response = await api.post('/auth/login', { email, password });
     console.log('API: Raw login response:', response.data);
     
-    // Transform backend response to match frontend expectations
-    // Handle new standardized API response format
+    // Handle ApiResponse.success() format from backend
     const apiData = response.data.success ? response.data.data : response.data;
+    console.log('API: Extracted data:', apiData);
+    
+    if (!apiData || !apiData.token || !apiData.user) {
+      console.error('API: Invalid response format:', apiData);
+      throw new Error('Invalid login response format');
+    }
+    
     const transformed = {
       access_token: apiData.token,
       user: {

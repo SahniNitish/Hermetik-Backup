@@ -57,7 +57,7 @@ interface NAVProviderProps {
   children: ReactNode;
 }
 
-const API_BASE_URL = 'https://api.allorigins.win/raw?url=http://23.20.137.235:3001/api';
+const API_BASE_URL = 'https://d2x6jnup74oap4.cloudfront.net/api';
 
 // API functions
 const navAPI = {
